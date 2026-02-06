@@ -154,6 +154,14 @@ impl Store {
         Ok(())
     }
 
+    pub fn rename_project(&self, id: i64, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE projects SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )?;
+        Ok(())
+    }
+
     fn row_to_project(row: &rusqlite::Row) -> Result<Project> {
         let state_str: String = row.get(2)?;
         let state = match state_str.as_str() {

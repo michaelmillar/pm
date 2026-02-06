@@ -75,6 +75,20 @@ enum Commands {
         /// Project ID
         id: i64,
     },
+    /// Rename a project
+    Rename {
+        /// Project ID
+        id: i64,
+        /// New name
+        name: String,
+    },
+    /// Park a project (pause with reason)
+    Park {
+        /// Project ID
+        id: i64,
+        /// Reason for parking
+        reason: String,
+    },
 }
 
 pub fn run() {
@@ -103,6 +117,8 @@ pub fn run() {
         Commands::Remove { id } => cmd_remove(&store, id),
         Commands::Trash => cmd_trash(&store),
         Commands::Restore { id } => cmd_restore(&store, id),
+        Commands::Rename { id, name } => cmd_rename(&store, id, &name),
+        Commands::Park { id, reason } => cmd_park(&store, id, &reason),
     }
 }
 
@@ -306,10 +322,18 @@ fn cmd_scan(store: &Store) {
             let result = scanner::scan_project(path);
 
             // Calculate readiness from task completion
-            let readiness = if result.total_tasks > 0 {
+            // Only override manual scores if there's actual progress detected
+            let scan_readiness = if result.total_tasks > 0 {
                 ((result.completed_tasks as f32 / result.total_tasks as f32) * 100.0) as u8
             } else {
-                p.readiness // Keep existing if no tasks found
+                0
+            };
+
+            // Preserve manual scores: only update if scan shows progress OR no manual score exists
+            let readiness = if result.completed_tasks > 0 || p.readiness == 0 {
+                scan_readiness
+            } else {
+                p.readiness // Keep manual score when scan finds 0 completed
             };
 
             // Update last activity from git if available
@@ -481,4 +505,37 @@ fn cmd_restore(store: &Store, id: i64) {
 
     store.restore(id).unwrap();
     println!("Restored '{}'.", project.name);
+}
+
+fn cmd_rename(store: &Store, id: i64, name: &str) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    let old_name = project.name.clone();
+    store.rename_project(id, name).unwrap();
+    println!("Renamed '{}' -> '{}'", old_name, name);
+}
+
+fn cmd_park(store: &Store, id: i64, reason: &str) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    if project.state == ProjectState::Parked {
+        println!("Project '{}' is already parked.", project.name);
+        return;
+    }
+
+    store.update_state(id, ProjectState::Parked).unwrap();
+    println!("Parked '{}'. Reason: {}", project.name, reason);
+    println!("Revive with: pm score {} -i <impact> -m <money> -r <readiness>", id);
 }
