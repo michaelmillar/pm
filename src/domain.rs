@@ -19,6 +19,7 @@ pub struct Project {
     pub created_at: chrono::NaiveDate,
     pub soft_deadline: Option<chrono::NaiveDate>,
     pub path: Option<String>,
+    pub deleted_at: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +60,7 @@ mod tests {
             created_at: today - chrono::Duration::days(30),
             soft_deadline: None,
             path: None,
+            deleted_at: None,
         }
     }
 

@@ -36,8 +36,9 @@ impl Store {
                 path TEXT
             );",
         )?;
-        // Migration: add path column if missing
+        // Migrations
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN path TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN deleted_at TEXT", []);
         Ok(())
     }
 
@@ -52,7 +53,7 @@ impl Store {
 
     pub fn get_project(&self, id: i64) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
              FROM projects WHERE id = ?1",
         )?;
 
@@ -65,8 +66,8 @@ impl Store {
 
     pub fn list_active_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
-             FROM projects WHERE state = 'active' ORDER BY name",
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+             FROM projects WHERE state = 'active' AND deleted_at IS NULL ORDER BY name",
         )?;
 
         let mut projects = Vec::new();
@@ -79,8 +80,8 @@ impl Store {
 
     pub fn list_inbox_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
-             FROM projects WHERE state = 'inbox' ORDER BY created_at DESC",
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+             FROM projects WHERE state = 'inbox' AND deleted_at IS NULL ORDER BY created_at DESC",
         )?;
 
         let mut projects = Vec::new();
@@ -93,8 +94,8 @@ impl Store {
 
     pub fn list_linked_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
-             FROM projects WHERE path IS NOT NULL AND state = 'active' ORDER BY name",
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+             FROM projects WHERE path IS NOT NULL AND state = 'active' AND deleted_at IS NULL ORDER BY name",
         )?;
 
         let mut projects = Vec::new();
@@ -168,6 +169,7 @@ impl Store {
         let created_at: String = row.get(7)?;
         let soft_deadline: Option<String> = row.get(8)?;
         let path: Option<String> = row.get(9)?;
+        let deleted_at: Option<String> = row.get(10)?;
 
         Ok(Project {
             id: row.get(0)?,
@@ -181,7 +183,49 @@ impl Store {
             soft_deadline: soft_deadline
                 .map(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap()),
             path,
+            deleted_at: deleted_at
+                .map(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap()),
         })
+    }
+
+    pub fn soft_delete(&self, id: i64) -> Result<()> {
+        let today = chrono::Local::now().date_naive().to_string();
+        self.conn.execute(
+            "UPDATE projects SET deleted_at = ?1 WHERE id = ?2",
+            params![today, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn restore(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE projects SET deleted_at = NULL WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_deleted_projects(&self) -> Result<Vec<Project>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+             FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+        )?;
+
+        let mut projects = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            projects.push(Self::row_to_project(row)?);
+        }
+        Ok(projects)
+    }
+
+    pub fn purge_old_deleted(&self, days: i64) -> Result<usize> {
+        let cutoff = (chrono::Local::now().date_naive() - chrono::Duration::days(days)).to_string();
+        let count = self.conn.execute(
+            "DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(count)
     }
 }
 

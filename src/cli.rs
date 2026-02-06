@@ -63,6 +63,18 @@ enum Commands {
         /// Project ID
         id: i64,
     },
+    /// Remove a project (soft delete, recoverable for 30 days)
+    Remove {
+        /// Project ID
+        id: i64,
+    },
+    /// List deleted projects (recoverable within 30 days)
+    Trash,
+    /// Restore a deleted project
+    Restore {
+        /// Project ID
+        id: i64,
+    },
 }
 
 pub fn run() {
@@ -88,6 +100,9 @@ pub fn run() {
         Commands::Link { id, path } => cmd_link(&store, id, &path),
         Commands::Scan => cmd_scan(&store),
         Commands::Show { id } => cmd_show(&store, id),
+        Commands::Remove { id } => cmd_remove(&store, id),
+        Commands::Trash => cmd_trash(&store),
+        Commands::Restore { id } => cmd_restore(&store, id),
     }
 }
 
@@ -372,4 +387,98 @@ fn cmd_show(store: &Store, id: i64) {
     } else {
         println!("Not linked to codebase. Use: pm link {} <path>", id);
     }
+}
+
+fn cmd_remove(store: &Store, id: i64) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    if project.deleted_at.is_some() {
+        println!("Project '{}' is already deleted.", project.name);
+        return;
+    }
+
+    // Generate random confirmation phrase
+    let phrases = [
+        "red fox", "blue moon", "green leaf", "dark sky", "cold wind",
+        "warm sun", "deep lake", "tall tree", "fast car", "slow boat",
+    ];
+    let phrase = phrases[std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as usize % phrases.len()];
+
+    println!("You are about to delete: {}", project.name);
+    println!("This is a soft delete - recoverable for 30 days via 'pm restore {}'", id);
+    println!();
+    println!("To confirm, type: {}", phrase);
+    print!("> ");
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_err() {
+        println!("Failed to read input. Aborting.");
+        return;
+    }
+
+    if input.trim() != phrase {
+        println!("Confirmation failed. Project NOT deleted.");
+        return;
+    }
+
+    store.soft_delete(id).unwrap();
+    println!("Deleted '{}'. Recoverable for 30 days with: pm restore {}", project.name, id);
+
+    // Purge projects deleted more than 30 days ago
+    let purged = store.purge_old_deleted(30).unwrap();
+    if purged > 0 {
+        println!("(Permanently removed {} project(s) deleted over 30 days ago)", purged);
+    }
+}
+
+fn cmd_trash(store: &Store) {
+    let projects = store.list_deleted_projects().unwrap();
+    if projects.is_empty() {
+        println!("Trash is empty.");
+        return;
+    }
+
+    let today = Local::now().date_naive();
+    println!("TRASH ({} items):\n", projects.len());
+
+    for p in &projects {
+        if let Some(deleted_at) = p.deleted_at {
+            let days_ago = (today - deleted_at).num_days();
+            let days_left = 30 - days_ago;
+            println!(
+                "  [{}] {} (deleted {} days ago, {} days to restore)",
+                p.id, p.name, days_ago, days_left.max(0)
+            );
+        }
+    }
+
+    println!("\nRestore with: pm restore <id>");
+}
+
+fn cmd_restore(store: &Store, id: i64) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    if project.deleted_at.is_none() {
+        println!("Project '{}' is not deleted.", project.name);
+        return;
+    }
+
+    store.restore(id).unwrap();
+    println!("Restored '{}'.", project.name);
 }
