@@ -18,6 +18,15 @@ pub struct Project {
     pub last_activity: chrono::NaiveDate,
     pub created_at: chrono::NaiveDate,
     pub soft_deadline: Option<chrono::NaiveDate>,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanResult {
+    pub total_tasks: usize,
+    pub completed_tasks: usize,
+    pub last_commit_date: Option<chrono::NaiveDate>,
+    pub plan_files: Vec<String>,
 }
 
 impl Project {
@@ -49,6 +58,7 @@ mod tests {
             last_activity: today - chrono::Duration::days(days_stale),
             created_at: today - chrono::Duration::days(30),
             soft_deadline: None,
+            path: None,
         }
     }
 

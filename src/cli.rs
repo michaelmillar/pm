@@ -1,4 +1,5 @@
 use crate::domain::ProjectState;
+use crate::scanner;
 use crate::store::Store;
 use chrono::Local;
 use clap::{Parser, Subcommand};
@@ -48,6 +49,20 @@ enum Commands {
     Why,
     /// List projects in inbox
     Inbox,
+    /// Link a project to a codebase directory
+    Link {
+        /// Project ID
+        id: i64,
+        /// Path to the project directory
+        path: String,
+    },
+    /// Scan linked projects for progress from git and plan files
+    Scan,
+    /// Show detailed info for a project
+    Show {
+        /// Project ID
+        id: i64,
+    },
 }
 
 pub fn run() {
@@ -70,6 +85,9 @@ pub fn run() {
         Commands::Throne => cmd_throne(&store),
         Commands::Why => cmd_why(&store),
         Commands::Inbox => cmd_inbox(&store),
+        Commands::Link { id, path } => cmd_link(&store, id, &path),
+        Commands::Scan => cmd_scan(&store),
+        Commands::Show { id } => cmd_show(&store, id),
     }
 }
 
@@ -233,4 +251,125 @@ fn progress_bar(percent: usize, width: usize) -> String {
     let filled = (percent * width) / 100;
     let empty = width - filled;
     format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+}
+
+fn cmd_link(store: &Store, id: i64, path: &str) {
+    // Resolve to absolute path
+    let abs_path = std::fs::canonicalize(path);
+    let final_path = match abs_path {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(_) => {
+            println!("Error: path '{}' does not exist", path);
+            return;
+        }
+    };
+
+    // Verify it's a directory
+    if !std::path::Path::new(&final_path).is_dir() {
+        println!("Error: '{}' is not a directory", final_path);
+        return;
+    }
+
+    store.link_project(id, &final_path).unwrap();
+    println!("Linked project {} to {}", id, final_path);
+    println!("Run 'pm scan' to detect progress from git and plan files.");
+}
+
+fn cmd_scan(store: &Store) {
+    let projects = store.list_linked_projects().unwrap();
+    if projects.is_empty() {
+        println!("No linked projects. Use 'pm link <id> <path>' to link a project to its codebase.");
+        return;
+    }
+
+    println!("Scanning {} linked projects...\n", projects.len());
+
+    for p in &projects {
+        if let Some(ref path) = p.path {
+            print!("  {} ", p.name);
+
+            let result = scanner::scan_project(path);
+
+            // Calculate readiness from task completion
+            let readiness = if result.total_tasks > 0 {
+                ((result.completed_tasks as f32 / result.total_tasks as f32) * 100.0) as u8
+            } else {
+                p.readiness // Keep existing if no tasks found
+            };
+
+            // Update last activity from git if available
+            let last_activity = result.last_commit_date.unwrap_or(p.last_activity);
+
+            // Update the project
+            store.update_from_scan(p.id, readiness, last_activity).unwrap();
+
+            // Report
+            if result.total_tasks > 0 {
+                println!(
+                    "-> {}/{} tasks done ({}%), last commit: {}",
+                    result.completed_tasks,
+                    result.total_tasks,
+                    readiness,
+                    last_activity
+                );
+            } else {
+                println!("-> no plan tasks found, last commit: {}", last_activity);
+            }
+
+            if !result.plan_files.is_empty() {
+                println!("     plans: {}", result.plan_files.join(", "));
+            }
+        }
+    }
+
+    println!("\nDone. Run 'pm throne' to see updated priorities.");
+}
+
+fn cmd_show(store: &Store, id: i64) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    let today = Local::now().date_naive();
+    let days_stale = (today - project.last_activity).num_days();
+    let score = project.priority_score(today);
+
+    println!("Project: {}", project.name);
+    println!("ID: {}", project.id);
+    println!("State: {:?}", project.state);
+    println!();
+    println!("Scores:");
+    println!("  Impact:       {}/10", project.impact);
+    println!("  Monetization: {}/10", project.monetization);
+    println!("  Readiness:    {}%", project.readiness);
+    println!("  Priority:     {} (computed)", score);
+    println!();
+    println!("Dates:");
+    println!("  Created:       {}", project.created_at);
+    println!("  Last activity: {} ({} days ago)", project.last_activity, days_stale);
+    if let Some(deadline) = project.soft_deadline {
+        println!("  Soft deadline: {}", deadline);
+    }
+    println!();
+    if let Some(ref path) = project.path {
+        println!("Linked to: {}", path);
+
+        // Show scan info
+        let result = scanner::scan_project(path);
+        if result.total_tasks > 0 {
+            println!("Plan progress: {}/{} tasks", result.completed_tasks, result.total_tasks);
+        }
+        if !result.plan_files.is_empty() {
+            println!("Plan files:");
+            for f in &result.plan_files {
+                println!("  - {}", f);
+            }
+        }
+    } else {
+        println!("Not linked to codebase. Use: pm link {} <path>", id);
+    }
 }

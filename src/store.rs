@@ -32,9 +32,12 @@ impl Store {
                 readiness INTEGER NOT NULL DEFAULT 0,
                 last_activity TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                soft_deadline TEXT
+                soft_deadline TEXT,
+                path TEXT
             );",
         )?;
+        // Migration: add path column if missing
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN path TEXT", []);
         Ok(())
     }
 
@@ -49,7 +52,7 @@ impl Store {
 
     pub fn get_project(&self, id: i64) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
              FROM projects WHERE id = ?1",
         )?;
 
@@ -62,7 +65,7 @@ impl Store {
 
     pub fn list_active_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
              FROM projects WHERE state = 'active' ORDER BY name",
         )?;
 
@@ -76,7 +79,7 @@ impl Store {
 
     pub fn list_inbox_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
              FROM projects WHERE state = 'inbox' ORDER BY created_at DESC",
         )?;
 
@@ -86,6 +89,36 @@ impl Store {
             projects.push(Self::row_to_project(row)?);
         }
         Ok(projects)
+    }
+
+    pub fn list_linked_projects(&self) -> Result<Vec<Project>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path
+             FROM projects WHERE path IS NOT NULL AND state = 'active' ORDER BY name",
+        )?;
+
+        let mut projects = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            projects.push(Self::row_to_project(row)?);
+        }
+        Ok(projects)
+    }
+
+    pub fn link_project(&self, id: i64, path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE projects SET path = ?1 WHERE id = ?2",
+            params![path, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_from_scan(&self, id: i64, readiness: u8, last_activity: chrono::NaiveDate) -> Result<()> {
+        self.conn.execute(
+            "UPDATE projects SET readiness = ?1, last_activity = ?2 WHERE id = ?3",
+            params![readiness, last_activity.to_string(), id],
+        )?;
+        Ok(())
     }
 
     pub fn update_scores(&self, id: i64, impact: u8, monetization: u8, readiness: u8) -> Result<()> {
@@ -134,6 +167,7 @@ impl Store {
         let last_activity: String = row.get(6)?;
         let created_at: String = row.get(7)?;
         let soft_deadline: Option<String> = row.get(8)?;
+        let path: Option<String> = row.get(9)?;
 
         Ok(Project {
             id: row.get(0)?,
@@ -146,6 +180,7 @@ impl Store {
             created_at: NaiveDate::parse_from_str(&created_at, "%Y-%m-%d").unwrap(),
             soft_deadline: soft_deadline
                 .map(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap()),
+            path,
         })
     }
 }
