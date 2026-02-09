@@ -787,7 +787,7 @@ fn cmd_mark(store: &Store, id: i64, task_number: usize, plan: Option<String>) {
 
     // Determine plan file
     let plan_file = match plan {
-        Some(p) => p,
+        Some(p) => normalize_plan_file(&p),
         None => {
             // Find the most recent plan file (last alphabetically — works with date prefixes)
             let plans_dir = project_path.join("docs").join("plans");
@@ -866,6 +866,14 @@ fn cmd_mark(store: &Store, id: i64, task_number: usize, plan: Option<String>) {
     }
 }
 
+fn normalize_plan_file(input: &str) -> String {
+    std::path::Path::new(input)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(input)
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -874,5 +882,12 @@ mod tests {
     fn test_validate_scores_rejects_out_of_range() {
         let err = validate_scores(0, 11, 101).unwrap_err();
         assert!(err.contains("impact"));
+    }
+
+    #[test]
+    fn test_normalize_plan_file_accepts_path() {
+        let input = "docs/plans/2026-02-09-plan.md";
+        let output = normalize_plan_file(input);
+        assert_eq!(output, "2026-02-09-plan.md");
     }
 }
