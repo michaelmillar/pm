@@ -122,12 +122,18 @@ impl Store {
         Ok(())
     }
 
-    pub fn update_scores(&self, id: i64, impact: u8, monetization: u8, readiness: u8) -> Result<()> {
-        self.conn.execute(
+    pub fn update_scores(
+        &self,
+        id: i64,
+        impact: u8,
+        monetization: u8,
+        readiness: u8,
+    ) -> Result<usize> {
+        let count = self.conn.execute(
             "UPDATE projects SET impact = ?1, monetization = ?2, readiness = ?3 WHERE id = ?4",
             params![impact, monetization, readiness, id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
     pub fn update_state(&self, id: i64, state: ProjectState) -> Result<()> {
@@ -262,6 +268,13 @@ mod tests {
         assert_eq!(project.impact, 8);
         assert_eq!(project.monetization, 7);
         assert_eq!(project.readiness, 60);
+    }
+
+    #[test]
+    fn test_update_scores_returns_not_found() {
+        let store = Store::open_in_memory().unwrap();
+        let result = store.update_scores(999, 8, 7, 60).unwrap();
+        assert_eq!(result, 0);
     }
 
     #[test]
