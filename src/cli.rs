@@ -230,6 +230,11 @@ fn cmd_add(store: &Store, name: &str) {
 }
 
 fn cmd_score(store: &Store, id: i64, impact: u8, monetization: u8, readiness: u8) {
+    if let Err(err) = validate_scores(impact, monetization, readiness) {
+        println!("Score error: {}", err);
+        return;
+    }
+
     let updated = store.update_scores(id, impact, monetization, readiness).unwrap();
     if updated == 0 {
         println!("Project {} not found", id);
@@ -241,6 +246,19 @@ fn cmd_score(store: &Store, id: i64, impact: u8, monetization: u8, readiness: u8
         return;
     }
     println!("Updated project {} and moved to active.", id);
+}
+
+fn validate_scores(impact: u8, monetization: u8, readiness: u8) -> Result<(), String> {
+    if !(1..=10).contains(&impact) {
+        return Err("impact must be 1-10".to_string());
+    }
+    if !(1..=10).contains(&monetization) {
+        return Err("monetization must be 1-10".to_string());
+    }
+    if readiness > 100 {
+        return Err("readiness must be 0-100".to_string());
+    }
+    Ok(())
 }
 
 fn cmd_throne(store: &Store) {
@@ -845,5 +863,16 @@ fn cmd_mark(store: &Store, id: i64, task_number: usize, plan: Option<String>) {
     if first_creation {
         println!("\nTip: Add .pm-progress to your .gitignore:");
         println!("  echo .pm-progress >> {}/.gitignore", path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_scores_rejects_out_of_range() {
+        let err = validate_scores(0, 11, 101).unwrap_err();
+        assert!(err.contains("impact"));
     }
 }
