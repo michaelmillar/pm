@@ -46,4 +46,14 @@ mod tests {
         let result = score_project(&store, 999, 5, 5, 50).unwrap();
         assert!(matches!(result, ScoreResult::NotFound { .. }));
     }
+
+    #[test]
+    fn test_score_project_invalid_readiness() {
+        let store = Store::open_in_memory().unwrap();
+        let result = score_project(&store, 1, 5, 5, 200).unwrap();
+        assert!(matches!(
+            result,
+            ScoreResult::Invalid { field: "readiness" }
+        ));
+    }
 }
