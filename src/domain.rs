@@ -28,6 +28,23 @@ pub struct ScanResult {
     pub completed_tasks: usize,
     pub last_commit_date: Option<chrono::NaiveDate>,
     pub plan_files: Vec<String>,
+    pub has_progress_file: bool,
+    pub charter_filled: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskSource {
+    Manual,
+    Git,
+    Pending,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskStatus {
+    pub plan_file: String,
+    pub task_number: usize,
+    pub description: String,
+    pub source: TaskSource,
 }
 
 impl Project {

@@ -1,9 +1,10 @@
-use crate::domain::ProjectState;
+use crate::charter;
+use crate::domain::{ProjectState, TaskSource};
 use crate::scanner;
 use crate::store::Store;
 use chrono::Local;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "pm")]
@@ -89,6 +90,29 @@ enum Commands {
         /// Reason for parking
         reason: String,
     },
+    /// List all tasks for a project with their status
+    Tasks {
+        /// Project ID
+        id: i64,
+    },
+    /// Generate or check a project charter
+    Charter {
+        /// Project ID
+        id: i64,
+        /// Overwrite existing charter
+        #[arg(long)]
+        force: bool,
+    },
+    /// Mark a task as done in the local progress file
+    Mark {
+        /// Project ID
+        id: i64,
+        /// Task number to mark done
+        task_number: usize,
+        /// Plan file name (defaults to most recent)
+        #[arg(long)]
+        plan: Option<String>,
+    },
 }
 
 pub fn run() {
@@ -119,6 +143,13 @@ pub fn run() {
         Commands::Restore { id } => cmd_restore(&store, id),
         Commands::Rename { id, name } => cmd_rename(&store, id, &name),
         Commands::Park { id, reason } => cmd_park(&store, id, &reason),
+        Commands::Tasks { id } => cmd_tasks(&store, id),
+        Commands::Charter { id, force } => cmd_charter(&store, id, force),
+        Commands::Mark {
+            id,
+            task_number,
+            plan,
+        } => cmd_mark(&store, id, task_number, plan),
     }
 }
 
@@ -304,6 +335,7 @@ fn cmd_link(store: &Store, id: i64, path: &str) {
     store.link_project(id, &final_path).unwrap();
     println!("Linked project {} to {}", id, final_path);
     println!("Run 'pm scan' to detect progress from git and plan files.");
+    println!("Run 'pm charter {}' to generate a project charter.", id);
 }
 
 fn cmd_scan(store: &Store) {
@@ -358,6 +390,28 @@ fn cmd_scan(store: &Store) {
             if !result.plan_files.is_empty() {
                 println!("     plans: {}", result.plan_files.join(", "));
             }
+            if result.has_progress_file {
+                println!("     .pm-progress: active");
+            }
+            match result.charter_filled {
+                Some((filled, total)) if filled == total => {
+                    println!("     charter: complete");
+                }
+                Some((filled, total)) => {
+                    println!("     charter: {}/{} filled (pm charter {})", filled, total, p.id);
+                }
+                None => {
+                    println!("     charter: missing (pm charter {})", p.id);
+                }
+            }
+            if result.plan_files.len() >= 3 && result.total_tasks >= 15 {
+                println!(
+                    "     hint: {} tasks across {} plans — consider splitting (pm tasks {})",
+                    result.total_tasks,
+                    result.plan_files.len(),
+                    p.id
+                );
+            }
         }
     }
 
@@ -406,6 +460,20 @@ fn cmd_show(store: &Store, id: i64) {
             println!("Plan files:");
             for f in &result.plan_files {
                 println!("  - {}", f);
+            }
+        }
+        if result.has_progress_file {
+            println!(".pm-progress: active");
+        }
+        match result.charter_filled {
+            Some((filled, total)) if filled == total => {
+                println!("Charter: complete");
+            }
+            Some((filled, total)) => {
+                println!("Charter: {}/{} sections filled (pm charter {})", filled, total, id);
+            }
+            None => {
+                println!("Charter: missing (pm charter {})", id);
             }
         }
     } else {
@@ -538,4 +606,212 @@ fn cmd_park(store: &Store, id: i64, reason: &str) {
     store.update_state(id, ProjectState::Parked).unwrap();
     println!("Parked '{}'. Reason: {}", project.name, reason);
     println!("Revive with: pm score {} -i <impact> -m <money> -r <readiness>", id);
+}
+
+fn cmd_tasks(store: &Store, id: i64) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => {
+            println!("Project '{}' is not linked to a codebase.", project.name);
+            println!("Link with: pm link {} <path>", id);
+            return;
+        }
+    };
+
+    let tasks = scanner::list_tasks(Path::new(&path));
+    if tasks.is_empty() {
+        println!("No plan tasks found for '{}'.", project.name);
+        println!("Add plans in docs/plans/*.md with '### Task N: description' headers.");
+        return;
+    }
+
+    println!("Tasks for: {}\n", project.name);
+
+    let mut current_plan = String::new();
+    for t in &tasks {
+        if t.plan_file != current_plan {
+            if !current_plan.is_empty() {
+                println!();
+            }
+            println!("  {}", t.plan_file);
+            current_plan = t.plan_file.clone();
+        }
+
+        let marker = match t.source {
+            TaskSource::Manual => "x",
+            TaskSource::Git => "~",
+            TaskSource::Pending => " ",
+        };
+        println!("    [{}] Task {}: {}", marker, t.task_number, t.description);
+    }
+
+    println!("\nLegend: [x] = marked done, [~] = detected from git, [ ] = pending");
+    println!("Mark tasks: pm mark {} <task-number>", id);
+
+    // Suggest splitting if project looks unwieldy
+    let plan_count = {
+        let mut seen = std::collections::HashSet::new();
+        for t in &tasks {
+            seen.insert(&t.plan_file);
+        }
+        seen.len()
+    };
+    if plan_count >= 3 && tasks.len() >= 15 {
+        println!();
+        println!(
+            "Hint: {} has {} tasks across {} plans. Consider splitting into",
+            project.name,
+            tasks.len(),
+            plan_count
+        );
+        println!("separate projects that can be stitched together later.");
+        println!("Use 'pm add \"sub-project\"' and link each to its own repo/branch.");
+    }
+}
+
+fn cmd_charter(store: &Store, id: i64, force: bool) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => {
+            println!("Project '{}' is not linked to a codebase.", project.name);
+            println!("Link with: pm link {} <path>", id);
+            return;
+        }
+    };
+
+    match charter::generate_charter(Path::new(&path), &project.name, force) {
+        Ok(charter::CharterAction::Created) => {
+            println!("Created docs/CHARTER.md for '{}'.", project.name);
+            println!("Fill in the 9 sections, then run 'pm charter {}' to check progress.", id);
+        }
+        Ok(charter::CharterAction::AlreadyExists(filled, total)) => {
+            if filled == total {
+                println!("Charter: complete ({}/{})", filled, total);
+            } else {
+                println!("Charter: {}/{} sections filled", filled, total);
+            }
+            println!("Use --force to regenerate: pm charter {} --force", id);
+        }
+        Ok(charter::CharterAction::Overwritten) => {
+            println!("Overwritten docs/CHARTER.md for '{}'.", project.name);
+            println!("Fill in the 9 sections, then run 'pm charter {}' to check progress.", id);
+        }
+        Err(e) => println!("Error: {}", e),
+    }
+}
+
+fn cmd_mark(store: &Store, id: i64, task_number: usize, plan: Option<String>) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => {
+            println!("Project {} not found", id);
+            return;
+        }
+    };
+
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => {
+            println!("Project '{}' is not linked to a codebase.", project.name);
+            return;
+        }
+    };
+
+    let project_path = Path::new(&path);
+
+    // Determine plan file
+    let plan_file = match plan {
+        Some(p) => p,
+        None => {
+            // Find the most recent plan file (last alphabetically — works with date prefixes)
+            let plans_dir = project_path.join("docs").join("plans");
+            if !plans_dir.exists() {
+                println!("No plans directory found at docs/plans/");
+                return;
+            }
+            let mut plans: Vec<String> = match std::fs::read_dir(&plans_dir) {
+                Ok(entries) => entries
+                    .flatten()
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .map(|ext| ext == "md")
+                            .unwrap_or(false)
+                    })
+                    .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+                    .collect(),
+                Err(_) => {
+                    println!("Could not read plans directory.");
+                    return;
+                }
+            };
+            plans.sort();
+            match plans.last() {
+                Some(p) => p.clone(),
+                None => {
+                    println!("No plan files found in docs/plans/");
+                    return;
+                }
+            }
+        }
+    };
+
+    // Validate task number exists
+    let tasks = scanner::list_tasks(project_path);
+    let valid = tasks
+        .iter()
+        .any(|t| t.plan_file == plan_file && t.task_number == task_number);
+    if !valid {
+        println!(
+            "Task {} not found in {}. Run 'pm tasks {}' to see available tasks.",
+            task_number, plan_file, id
+        );
+        return;
+    }
+
+    // Check if already marked
+    let progress = scanner::read_progress_file(project_path);
+    if progress.contains(&(plan_file.clone(), task_number)) {
+        println!("Task {} in {} is already marked done.", task_number, plan_file);
+        return;
+    }
+
+    // Append to .pm-progress
+    let progress_path = project_path.join(".pm-progress");
+    let first_creation = !progress_path.exists();
+
+    let entry = format!("{}:{}\n", plan_file, task_number);
+    let mut content = if progress_path.exists() {
+        std::fs::read_to_string(&progress_path).unwrap_or_default()
+    } else {
+        "# Manually marked tasks\n".to_string()
+    };
+    content.push_str(&entry);
+    std::fs::write(&progress_path, content).unwrap();
+
+    println!(
+        "Marked task {} done in {} for '{}'.",
+        task_number, plan_file, project.name
+    );
+
+    if first_creation {
+        println!("\nTip: Add .pm-progress to your .gitignore:");
+        println!("  echo .pm-progress >> {}/.gitignore", path);
+    }
 }
