@@ -354,4 +354,65 @@ mod tests {
             .collect();
         assert!(cols.contains(&"deleted_at".to_string()));
     }
+
+    #[test]
+    fn test_list_inbox_projects_excludes_deleted() {
+        let store = Store::open_in_memory().unwrap();
+        let id1 = store.add_project("inbox1").unwrap();
+        let _id2 = store.add_project("inbox2").unwrap();
+
+        store.soft_delete(id1).unwrap();
+
+        let inbox = store.list_inbox_projects().unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].name, "inbox2");
+    }
+
+    #[test]
+    fn test_list_linked_projects_requires_active() {
+        let store = Store::open_in_memory().unwrap();
+        let id1 = store.add_project("linked-active").unwrap();
+        let id2 = store.add_project("linked-inbox").unwrap();
+
+        store.update_state(id1, ProjectState::Active).unwrap();
+        store.link_project(id1, "/tmp/linked-active").unwrap();
+        store.link_project(id2, "/tmp/linked-inbox").unwrap();
+
+        let linked = store.list_linked_projects().unwrap();
+        assert_eq!(linked.len(), 1);
+        assert_eq!(linked[0].name, "linked-active");
+    }
+
+    #[test]
+    fn test_soft_delete_and_restore() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("to-delete").unwrap();
+
+        store.soft_delete(id).unwrap();
+        let deleted = store.list_deleted_projects().unwrap();
+        assert_eq!(deleted.len(), 1);
+
+        store.restore(id).unwrap();
+        let deleted = store.list_deleted_projects().unwrap();
+        assert_eq!(deleted.len(), 0);
+    }
+
+    #[test]
+    fn test_purge_old_deleted() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("old-deleted").unwrap();
+        store.soft_delete(id).unwrap();
+
+        let old_date = (chrono::Local::now().date_naive() - chrono::Duration::days(40)).to_string();
+        store
+            .conn
+            .execute(
+                "UPDATE projects SET deleted_at = ?1 WHERE id = ?2",
+                params![old_date, id],
+            )
+            .unwrap();
+
+        let purged = store.purge_old_deleted(30).unwrap();
+        assert_eq!(purged, 1);
+    }
 }

@@ -882,6 +882,8 @@ fn normalize_plan_file(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
 
     #[test]
     fn test_validate_scores_rejects_out_of_range() {
@@ -901,5 +903,97 @@ mod tests {
         let s = "naïve café";
         let result = std::panic::catch_unwind(|| truncate(s, 6));
         assert!(result.is_ok());
+    }
+
+    fn setup_project(store: &Store, name: &str) -> i64 {
+        let id = store.add_project(name).unwrap();
+        store.update_state(id, ProjectState::Active).unwrap();
+        id
+    }
+
+    #[test]
+    fn test_cmd_score_updates_project() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("score-me").unwrap();
+        cmd_score(&store, id, 8, 7, 60);
+
+        let project = store.get_project(id).unwrap().unwrap();
+        assert_eq!(project.impact, 8);
+        assert_eq!(project.monetization, 7);
+        assert_eq!(project.readiness, 60);
+        assert_eq!(project.state, ProjectState::Active);
+    }
+
+    #[test]
+    fn test_cmd_mark_writes_progress_file() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let plans_dir = tmp.path().join("docs").join("plans");
+        std::fs::create_dir_all(&plans_dir).unwrap();
+        std::fs::write(plans_dir.join("plan.md"), "### Task 1: Do thing\n").unwrap();
+
+        let id = store.add_project("mark-me").unwrap();
+        store.update_state(id, ProjectState::Active).unwrap();
+        store
+            .link_project(id, tmp.path().to_string_lossy().as_ref())
+            .unwrap();
+
+        cmd_mark(&store, id, 1, Some("plan.md".to_string()));
+
+        let progress = std::fs::read_to_string(tmp.path().join(".pm-progress")).unwrap();
+        assert!(progress.contains("plan.md:1"));
+    }
+
+    #[test]
+    fn test_cmd_scan_updates_readiness() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+
+        // init git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::fs::write(tmp.path().join("README.md"), "init").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial commit"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        let plans_dir = tmp.path().join("docs").join("plans");
+        std::fs::create_dir_all(&plans_dir).unwrap();
+        std::fs::write(
+            plans_dir.join("plan.md"),
+            "### Task 1: Add widget pipeline\n### Task 2: Add reporting view\n",
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join(".pm-progress"), "plan.md:1\n").unwrap();
+
+        let id = setup_project(&store, "scan-me");
+        store
+            .link_project(id, tmp.path().to_string_lossy().as_ref())
+            .unwrap();
+
+        cmd_scan(&store);
+
+        let project = store.get_project(id).unwrap().unwrap();
+        assert_eq!(project.readiness, 50);
     }
 }

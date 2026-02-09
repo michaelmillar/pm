@@ -306,6 +306,27 @@ pub fn list_tasks(project_path: &Path) -> Vec<TaskStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn init_git_repo(path: &Path) {
+        let run = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .status()
+                .expect("git command failed");
+            assert!(status.success());
+        };
+
+        run(&["init"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test User"]);
+
+        fs::write(path.join("README.md"), "init").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-m", "initial commit"]);
+    }
 
     #[test]
     fn test_count_tasks_basic() {
@@ -373,5 +394,85 @@ More content
     fn test_read_progress_file_empty() {
         let set = read_progress_file(Path::new("/nonexistent/path"));
         assert!(set.is_empty());
+    }
+
+    #[test]
+    fn test_get_last_commit_date_returns_date() {
+        let tmp = TempDir::new().unwrap();
+        init_git_repo(tmp.path());
+        let date = get_last_commit_date(tmp.path());
+        assert!(date.is_some());
+    }
+
+    #[test]
+    fn test_get_recent_commit_files_contains_file() {
+        let tmp = TempDir::new().unwrap();
+        init_git_repo(tmp.path());
+
+        fs::write(tmp.path().join("src/feature.rs"), "fn x() {}").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "add feature module"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        let files = get_recent_commit_files(tmp.path());
+        assert!(files.iter().any(|f| f.contains("src/feature.rs")));
+    }
+
+    #[test]
+    fn test_scan_project_detects_plan_and_progress() {
+        let tmp = TempDir::new().unwrap();
+        init_git_repo(tmp.path());
+
+        let plans_dir = tmp.path().join("docs").join("plans");
+        fs::create_dir_all(&plans_dir).unwrap();
+        let plan = r#"### Task 1: Add widget pipeline
+### Task 2: Add reporting view
+"#;
+        fs::write(plans_dir.join("plan.md"), plan).unwrap();
+        fs::write(tmp.path().join(".pm-progress"), "plan.md:1\n").unwrap();
+
+        let result = scan_project(tmp.path().to_str().unwrap());
+        assert_eq!(result.total_tasks, 2);
+        assert_eq!(result.completed_tasks, 1);
+        assert!(result.has_progress_file);
+        assert_eq!(result.plan_files.len(), 1);
+    }
+
+    #[test]
+    fn test_list_tasks_sources() {
+        let tmp = TempDir::new().unwrap();
+        init_git_repo(tmp.path());
+
+        let plans_dir = tmp.path().join("docs").join("plans");
+        fs::create_dir_all(&plans_dir).unwrap();
+        let plan = r#"### Task 1: Add widget pipeline
+### Task 2: Add reporting view
+"#;
+        fs::write(plans_dir.join("plan.md"), plan).unwrap();
+        fs::write(tmp.path().join(".pm-progress"), "plan.md:1\n").unwrap();
+
+        fs::write(tmp.path().join("reporting.txt"), "done").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "add reporting view"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        let tasks = list_tasks(tmp.path());
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].source, TaskSource::Manual);
+        assert_eq!(tasks[1].source, TaskSource::Git);
     }
 }
