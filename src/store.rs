@@ -136,7 +136,7 @@ impl Store {
         Ok(count)
     }
 
-    pub fn update_state(&self, id: i64, state: ProjectState) -> Result<()> {
+    pub fn update_state(&self, id: i64, state: ProjectState) -> Result<usize> {
         let state_str = match state {
             ProjectState::Inbox => "inbox",
             ProjectState::Active => "active",
@@ -144,11 +144,11 @@ impl Store {
             ProjectState::Shipped => "shipped",
             ProjectState::Killed => "killed",
         };
-        self.conn.execute(
+        let count = self.conn.execute(
             "UPDATE projects SET state = ?1 WHERE id = ?2",
             params![state_str, id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
     pub fn touch_project(&self, id: i64) -> Result<()> {
@@ -286,6 +286,13 @@ mod tests {
 
         let project = store.get_project(id).unwrap().unwrap();
         assert_eq!(project.state, ProjectState::Active);
+    }
+
+    #[test]
+    fn test_update_state_returns_not_found() {
+        let store = Store::open_in_memory().unwrap();
+        let count = store.update_state(999, ProjectState::Active).unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]
