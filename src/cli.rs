@@ -1001,4 +1001,69 @@ mod tests {
             std::env::remove_var("PM_DATA_DIR");
         }
     }
+
+    #[test]
+    fn test_cmd_status_and_next() {
+        let store = Store::open_in_memory().unwrap();
+        cmd_status(&store);
+
+        let id = setup_project(&store, "alpha");
+        store.update_scores(id, 7, 6, 40).unwrap();
+        cmd_status(&store);
+        cmd_next(&store);
+    }
+
+    #[test]
+    fn test_cmd_inbox_throne_and_why() {
+        let store = Store::open_in_memory().unwrap();
+        let _id1 = store.add_project("idea-one").unwrap();
+        let _id2 = store.add_project("idea-two").unwrap();
+        cmd_inbox(&store);
+
+        let id = setup_project(&store, "alpha");
+        store.update_scores(id, 8, 7, 60).unwrap();
+        cmd_throne(&store);
+        cmd_why(&store);
+    }
+
+    #[test]
+    fn test_cmd_link_show_and_charter() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let id = store.add_project("linked").unwrap();
+
+        cmd_link(&store, id, tmp.path().to_string_lossy().as_ref());
+        cmd_show(&store, id);
+        cmd_charter(&store, id, false);
+        cmd_charter(&store, id, false);
+    }
+
+    #[test]
+    fn test_cmd_tasks_and_mark() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let plans_dir = tmp.path().join("docs").join("plans");
+        std::fs::create_dir_all(&plans_dir).unwrap();
+        std::fs::write(plans_dir.join("plan.md"), "### Task 1: Do thing\n").unwrap();
+
+        let id = store.add_project("tasks").unwrap();
+        store
+            .link_project(id, tmp.path().to_string_lossy().as_ref())
+            .unwrap();
+
+        cmd_tasks(&store, id);
+        cmd_mark(&store, id, 1, Some("plan.md".to_string()));
+    }
+
+    #[test]
+    fn test_cmd_trash_restore_rename_park() {
+        let store = Store::open_in_memory().unwrap();
+        let id = setup_project(&store, "old-name");
+        store.soft_delete(id).unwrap();
+
+        cmd_trash(&store);
+        cmd_restore(&store, id);
+        cmd_rename(&store, id, "new-name");
+        cmd_park(&store, id, "pause");
+    }
 }
