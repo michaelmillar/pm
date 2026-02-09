@@ -1,4 +1,5 @@
 use crate::charter;
+use crate::cli_core::{score_project, ScoreResult};
 use crate::domain::{ProjectState, TaskSource};
 use crate::scanner;
 use crate::store::Store;
@@ -237,35 +238,23 @@ fn cmd_add(store: &Store, name: &str) {
 }
 
 fn cmd_score(store: &Store, id: i64, impact: u8, monetization: u8, readiness: u8) {
-    if let Err(err) = validate_scores(impact, monetization, readiness) {
-        println!("Score error: {}", err);
-        return;
+    match score_project(store, id, impact, monetization, readiness).unwrap() {
+        ScoreResult::Updated { id } => {
+            println!("Updated project {} and moved to active.", id);
+        }
+        ScoreResult::NotFound { id } => {
+            println!("Project {} not found", id);
+        }
+        ScoreResult::Invalid { field } => {
+            let msg = match field {
+                "impact" => "impact must be 1-10",
+                "monetization" => "monetization must be 1-10",
+                "readiness" => "readiness must be 0-100",
+                _ => "invalid score",
+            };
+            println!("Score error: {}", msg);
+        }
     }
-
-    let updated = store.update_scores(id, impact, monetization, readiness).unwrap();
-    if updated == 0 {
-        println!("Project {} not found", id);
-        return;
-    }
-    let updated = store.update_state(id, ProjectState::Active).unwrap();
-    if updated == 0 {
-        println!("Project {} not found", id);
-        return;
-    }
-    println!("Updated project {} and moved to active.", id);
-}
-
-fn validate_scores(impact: u8, monetization: u8, readiness: u8) -> Result<(), String> {
-    if !(1..=10).contains(&impact) {
-        return Err("impact must be 1-10".to_string());
-    }
-    if !(1..=10).contains(&monetization) {
-        return Err("monetization must be 1-10".to_string());
-    }
-    if readiness > 100 {
-        return Err("readiness must be 0-100".to_string());
-    }
-    Ok(())
 }
 
 fn cmd_throne(store: &Store) {
@@ -892,12 +881,6 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn test_validate_scores_rejects_out_of_range() {
-        let err = validate_scores(0, 11, 101).unwrap_err();
-        assert!(err.contains("impact"));
-    }
 
     #[test]
     fn test_normalize_plan_file_accepts_path() {
