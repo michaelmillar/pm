@@ -106,20 +106,25 @@ impl Store {
         Ok(projects)
     }
 
-    pub fn link_project(&self, id: i64, path: &str) -> Result<()> {
-        self.conn.execute(
+    pub fn link_project(&self, id: i64, path: &str) -> Result<usize> {
+        let count = self.conn.execute(
             "UPDATE projects SET path = ?1 WHERE id = ?2",
             params![path, id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
-    pub fn update_from_scan(&self, id: i64, readiness: u8, last_activity: chrono::NaiveDate) -> Result<()> {
-        self.conn.execute(
+    pub fn update_from_scan(
+        &self,
+        id: i64,
+        readiness: u8,
+        last_activity: chrono::NaiveDate,
+    ) -> Result<usize> {
+        let count = self.conn.execute(
             "UPDATE projects SET readiness = ?1, last_activity = ?2 WHERE id = ?3",
             params![readiness, last_activity.to_string(), id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
     pub fn update_scores(
@@ -151,21 +156,21 @@ impl Store {
         Ok(count)
     }
 
-    pub fn touch_project(&self, id: i64) -> Result<()> {
+    pub fn touch_project(&self, id: i64) -> Result<usize> {
         let today = chrono::Local::now().date_naive().to_string();
-        self.conn.execute(
+        let count = self.conn.execute(
             "UPDATE projects SET last_activity = ?1 WHERE id = ?2",
             params![today, id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
-    pub fn rename_project(&self, id: i64, name: &str) -> Result<()> {
-        self.conn.execute(
+    pub fn rename_project(&self, id: i64, name: &str) -> Result<usize> {
+        let count = self.conn.execute(
             "UPDATE projects SET name = ?1 WHERE id = ?2",
             params![name, id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
     fn row_to_project(row: &rusqlite::Row) -> Result<Project> {
@@ -202,21 +207,21 @@ impl Store {
         })
     }
 
-    pub fn soft_delete(&self, id: i64) -> Result<()> {
+    pub fn soft_delete(&self, id: i64) -> Result<usize> {
         let today = chrono::Local::now().date_naive().to_string();
-        self.conn.execute(
+        let count = self.conn.execute(
             "UPDATE projects SET deleted_at = ?1 WHERE id = ?2",
             params![today, id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
-    pub fn restore(&self, id: i64) -> Result<()> {
-        self.conn.execute(
+    pub fn restore(&self, id: i64) -> Result<usize> {
+        let count = self.conn.execute(
             "UPDATE projects SET deleted_at = NULL WHERE id = ?1",
             params![id],
         )?;
-        Ok(())
+        Ok(count)
     }
 
     pub fn list_deleted_projects(&self) -> Result<Vec<Project>> {
@@ -308,5 +313,12 @@ mod tests {
 
         let active = store.list_active_projects().unwrap();
         assert_eq!(active.len(), 2);
+    }
+
+    #[test]
+    fn test_touch_project_returns_not_found() {
+        let store = Store::open_in_memory().unwrap();
+        let count = store.touch_project(999).unwrap();
+        assert_eq!(count, 0);
     }
 }

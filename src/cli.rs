@@ -212,7 +212,11 @@ fn cmd_status(store: &Store) {
 }
 
 fn cmd_done(store: &Store, id: i64) {
-    store.touch_project(id).unwrap();
+    let count = store.touch_project(id).unwrap();
+    if count == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
     println!("Marked progress on project {}. Keep shipping!", id);
 }
 
@@ -226,8 +230,16 @@ fn cmd_add(store: &Store, name: &str) {
 }
 
 fn cmd_score(store: &Store, id: i64, impact: u8, monetization: u8, readiness: u8) {
-    store.update_scores(id, impact, monetization, readiness).unwrap();
-    store.update_state(id, ProjectState::Active).unwrap();
+    let updated = store.update_scores(id, impact, monetization, readiness).unwrap();
+    if updated == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
+    let updated = store.update_state(id, ProjectState::Active).unwrap();
+    if updated == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
     println!("Updated project {} and moved to active.", id);
 }
 
@@ -332,7 +344,11 @@ fn cmd_link(store: &Store, id: i64, path: &str) {
         return;
     }
 
-    store.link_project(id, &final_path).unwrap();
+    let updated = store.link_project(id, &final_path).unwrap();
+    if updated == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
     println!("Linked project {} to {}", id, final_path);
     println!("Run 'pm scan' to detect progress from git and plan files.");
     println!("Run 'pm charter {}' to generate a project charter.", id);
@@ -523,7 +539,11 @@ fn cmd_remove(store: &Store, id: i64) {
         return;
     }
 
-    store.soft_delete(id).unwrap();
+    let deleted = store.soft_delete(id).unwrap();
+    if deleted == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
     println!("Deleted '{}'. Recoverable for 30 days with: pm restore {}", project.name, id);
 
     // Purge projects deleted more than 30 days ago
@@ -571,7 +591,11 @@ fn cmd_restore(store: &Store, id: i64) {
         return;
     }
 
-    store.restore(id).unwrap();
+    let restored = store.restore(id).unwrap();
+    if restored == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
     println!("Restored '{}'.", project.name);
 }
 
@@ -585,7 +609,11 @@ fn cmd_rename(store: &Store, id: i64, name: &str) {
     };
 
     let old_name = project.name.clone();
-    store.rename_project(id, name).unwrap();
+    let renamed = store.rename_project(id, name).unwrap();
+    if renamed == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
     println!("Renamed '{}' -> '{}'", old_name, name);
 }
 
@@ -603,7 +631,11 @@ fn cmd_park(store: &Store, id: i64, reason: &str) {
         return;
     }
 
-    store.update_state(id, ProjectState::Parked).unwrap();
+    let updated = store.update_state(id, ProjectState::Parked).unwrap();
+    if updated == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
     println!("Parked '{}'. Reason: {}", project.name, reason);
     println!("Revive with: pm score {} -i <impact> -m <money> -r <readiness>", id);
 }
