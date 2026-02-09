@@ -35,7 +35,7 @@ pub fn scan_project(project_path: &str) -> ScanResult {
 
 fn get_last_commit_date(path: &Path) -> Option<NaiveDate> {
     let output = Command::new("git")
-        .args(["log", "-1", "--format=%Y-%m-%d"])
+        .args(["log", "-1", "--format=%ad", "--date=format:%Y-%m-%d"])
         .current_dir(path)
         .output()
         .ok()?;
@@ -409,6 +409,7 @@ More content
         let tmp = TempDir::new().unwrap();
         init_git_repo(tmp.path());
 
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/feature.rs"), "fn x() {}").unwrap();
         Command::new("git")
             .args(["add", "."])
