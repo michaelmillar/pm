@@ -332,10 +332,15 @@ fn cmd_inbox(store: &Store) {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        format!("{:<width$}", s, width = max)
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        let mut out: String = chars.into_iter().collect();
+        let pad = max.saturating_sub(out.chars().count());
+        out.extend(std::iter::repeat(' ').take(pad));
+        out
     } else {
-        format!("{}...", &s[..max - 3])
+        let slice: String = chars.into_iter().take(max - 3).collect();
+        format!("{}...", slice)
     }
 }
 
@@ -889,5 +894,12 @@ mod tests {
         let input = "docs/plans/2026-02-09-plan.md";
         let output = normalize_plan_file(input);
         assert_eq!(output, "2026-02-09-plan.md");
+    }
+
+    #[test]
+    fn test_truncate_handles_unicode() {
+        let s = "naïve café";
+        let result = std::panic::catch_unwind(|| truncate(s, 6));
+        assert!(result.is_ok());
     }
 }
