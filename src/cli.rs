@@ -154,12 +154,19 @@ pub fn run() {
 }
 
 fn open_store() -> Store {
-    let data_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("pm");
+    let data_dir = resolve_data_dir();
     std::fs::create_dir_all(&data_dir).ok();
     let db_path = data_dir.join("pm.db");
     Store::open(&db_path).expect("Failed to open database")
+}
+
+fn resolve_data_dir() -> PathBuf {
+    if let Ok(val) = std::env::var("PM_DATA_DIR") {
+        return PathBuf::from(val);
+    }
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("pm")
 }
 
 fn cmd_next(store: &Store) {
@@ -884,6 +891,7 @@ mod tests {
     use super::*;
     use std::process::Command;
     use tempfile::TempDir;
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn test_validate_scores_rejects_out_of_range() {
@@ -995,5 +1003,19 @@ mod tests {
 
         let project = store.get_project(id).unwrap().unwrap();
         assert_eq!(project.readiness, 50);
+    }
+
+    #[test]
+    fn test_data_dir_override_env() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let tmp = TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("PM_DATA_DIR", tmp.path());
+        }
+        let dir = resolve_data_dir();
+        assert_eq!(dir, tmp.path());
+        unsafe {
+            std::env::remove_var("PM_DATA_DIR");
+        }
     }
 }
