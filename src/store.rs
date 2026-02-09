@@ -33,7 +33,8 @@ impl Store {
                 last_activity TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 soft_deadline TEXT,
-                path TEXT
+                path TEXT,
+                deleted_at TEXT
             );",
         )?;
         // Migrations
@@ -340,5 +341,17 @@ mod tests {
 
         let project = store.get_project(1).unwrap().unwrap();
         assert_eq!(project.name, "bad");
+    }
+
+    #[test]
+    fn test_schema_has_deleted_at_column() {
+        let store = Store::open_in_memory().unwrap();
+        let mut stmt = store.conn.prepare("PRAGMA table_info(projects)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(cols.contains(&"deleted_at".to_string()));
     }
 }
