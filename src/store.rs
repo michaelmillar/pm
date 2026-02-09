@@ -174,6 +174,11 @@ impl Store {
     }
 
     fn row_to_project(row: &rusqlite::Row) -> Result<Project> {
+        fn parse_date(value: &str) -> NaiveDate {
+            NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .unwrap_or_else(|_| chrono::Local::now().date_naive())
+        }
+
         let state_str: String = row.get(2)?;
         let state = match state_str.as_str() {
             "inbox" => ProjectState::Inbox,
@@ -197,13 +202,13 @@ impl Store {
             impact: row.get(3)?,
             monetization: row.get(4)?,
             readiness: row.get(5)?,
-            last_activity: NaiveDate::parse_from_str(&last_activity, "%Y-%m-%d").unwrap(),
-            created_at: NaiveDate::parse_from_str(&created_at, "%Y-%m-%d").unwrap(),
+            last_activity: parse_date(&last_activity),
+            created_at: parse_date(&created_at),
             soft_deadline: soft_deadline
-                .map(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap()),
+                .map(|s| parse_date(&s)),
             path,
             deleted_at: deleted_at
-                .map(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap()),
+                .map(|s| parse_date(&s)),
         })
     }
 
@@ -320,5 +325,20 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let count = store.touch_project(999).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_row_to_project_handles_bad_dates() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO projects (name, last_activity, created_at) VALUES (?1, ?2, ?3)",
+                params!["bad", "not-a-date", "not-a-date"],
+            )
+            .unwrap();
+
+        let project = store.get_project(1).unwrap().unwrap();
+        assert_eq!(project.name, "bad");
     }
 }
