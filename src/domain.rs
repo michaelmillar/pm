@@ -20,6 +20,7 @@ pub struct Project {
     pub soft_deadline: Option<chrono::NaiveDate>,
     pub path: Option<String>,
     pub deleted_at: Option<chrono::NaiveDate>,
+    pub duplicate_of: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +79,7 @@ mod tests {
             soft_deadline: None,
             path: None,
             deleted_at: None,
+            duplicate_of: None,
         }
     }
 

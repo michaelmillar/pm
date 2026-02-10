@@ -34,12 +34,14 @@ impl Store {
                 created_at TEXT NOT NULL,
                 soft_deadline TEXT,
                 path TEXT,
-                deleted_at TEXT
+                deleted_at TEXT,
+                duplicate_of INTEGER
             );",
         )?;
         // Migrations
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN path TEXT", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN deleted_at TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN duplicate_of INTEGER", []);
         Ok(())
     }
 
@@ -54,7 +56,7 @@ impl Store {
 
     pub fn get_project(&self, id: i64) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of
              FROM projects WHERE id = ?1",
         )?;
 
@@ -67,7 +69,7 @@ impl Store {
 
     pub fn list_active_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of
              FROM projects WHERE state = 'active' AND deleted_at IS NULL ORDER BY name",
         )?;
 
@@ -81,7 +83,7 @@ impl Store {
 
     pub fn list_inbox_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of
              FROM projects WHERE state = 'inbox' AND deleted_at IS NULL ORDER BY created_at DESC",
         )?;
 
@@ -95,7 +97,7 @@ impl Store {
 
     pub fn list_linked_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of
              FROM projects WHERE path IS NOT NULL AND state = 'active' AND deleted_at IS NULL ORDER BY name",
         )?;
 
@@ -109,7 +111,7 @@ impl Store {
 
     pub fn get_project_by_path(&self, path: &str) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of
              FROM projects WHERE path = ?1 AND deleted_at IS NULL",
         )?;
 
@@ -184,6 +186,14 @@ impl Store {
         Ok(count)
     }
 
+    pub fn mark_duplicate(&self, id: i64, original_id: i64) -> Result<usize> {
+        let count = self.conn.execute(
+            "UPDATE projects SET duplicate_of = ?1 WHERE id = ?2",
+            params![original_id, id],
+        )?;
+        Ok(count)
+    }
+
     pub fn move_to_inbox(&self, id: i64) -> Result<usize> {
         self.update_state(id, ProjectState::Inbox)
     }
@@ -226,6 +236,7 @@ impl Store {
         let soft_deadline: Option<String> = row.get(8)?;
         let path: Option<String> = row.get(9)?;
         let deleted_at: Option<String> = row.get(10)?;
+        let duplicate_of: Option<i64> = row.get(11)?;
 
         Ok(Project {
             id: row.get(0)?,
@@ -241,6 +252,7 @@ impl Store {
             path,
             deleted_at: deleted_at
                 .map(|s| parse_date(&s)),
+            duplicate_of,
         })
     }
 
@@ -263,7 +275,7 @@ impl Store {
 
     pub fn list_deleted_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of
              FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
         )?;
 
