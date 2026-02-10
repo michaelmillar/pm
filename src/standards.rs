@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct StandardsConfig {
+    #[serde(default)]
     pub requirements: Vec<Check>,
+    #[serde(default)]
     pub nice_to_haves: Vec<Check>,
     #[serde(default)]
     pub languages: HashMap<String, LanguageChecks>,
@@ -51,12 +53,20 @@ pub fn evaluate_repo(path: &Path, cfg: &StandardsConfig) -> Result<StandardsRepo
         if check_path(path, &check.check) {
             report.requirements_met += 1;
         } else {
-            report.missing.push(check.name.clone());
+            if let Some(fix) = try_fix(path, &check.check) {
+                report.fixes.push(fix);
+                report.requirements_met += 1;
+            } else {
+                report.missing.push(check.name.clone());
+            }
         }
     }
 
     for check in &cfg.nice_to_haves {
         if check_path(path, &check.check) {
+            report.nice_to_haves_met += 1;
+        } else if let Some(fix) = try_fix(path, &check.check) {
+            report.fixes.push(fix);
             report.nice_to_haves_met += 1;
         } else {
             report.missing.push(check.name.clone());
@@ -83,6 +93,66 @@ fn check_path(base: &Path, check: &str) -> bool {
         "package_json" => path_exists(base, "package.json"),
         _ => false,
     }
+}
+
+fn try_fix(base: &Path, check: &str) -> Option<String> {
+    match check {
+        "readme" => ensure_readme(base).ok()?,
+        "license" => ensure_license(base).ok()?,
+        "agents_md" => ensure_agents(base).ok()?,
+        "docs_dir" => ensure_dir(base.join("docs")).ok()?,
+        "docs_plans_dir" => ensure_dir(base.join("docs").join("plans")).ok()?,
+        "tests_dir" => ensure_dir(base.join("tests")).ok()?,
+        _ => return None,
+    };
+    Some(check_file_label(check))
+}
+
+fn check_file_label(check: &str) -> String {
+    match check {
+        "readme" => "README.md",
+        "license" => "LICENSE",
+        "agents_md" => "AGENTS.md",
+        "docs_dir" => "docs/",
+        "docs_plans_dir" => "docs/plans/",
+        "tests_dir" => "tests/",
+        other => other,
+    }
+    .to_string()
+}
+
+fn ensure_readme(base: &Path) -> Result<(), std::io::Error> {
+    let path = base.join("README.md");
+    if path.exists() {
+        return Ok(());
+    }
+    std::fs::write(
+        path,
+        "# Project\n\n## Ethos/Mission\n- Problem: \n- Audience: \n- Promise: \n- Principles: \n\n## Build/Test\n- ",
+    )
+}
+
+fn ensure_license(base: &Path) -> Result<(), std::io::Error> {
+    let path = base.join("LICENSE");
+    if path.exists() {
+        return Ok(());
+    }
+    std::fs::write(path, "")
+}
+
+fn ensure_agents(base: &Path) -> Result<(), std::io::Error> {
+    let path = base.join("AGENTS.md");
+    if path.exists() {
+        return Ok(());
+    }
+    std::fs::write(path, "")
+}
+
+fn ensure_dir(path: PathBuf) -> Result<(), std::io::Error> {
+    if path.exists() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(path)
 }
 
 fn path_exists(base: &Path, name: &str) -> bool {
