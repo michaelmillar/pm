@@ -343,6 +343,15 @@ fn cmd_inbox(store: &Store) {
     for p in &projects {
         println!("  [{}] {}", p.id, p.name);
     }
+    let possible = store.list_possible_duplicates(0.80).unwrap();
+    if !possible.is_empty() {
+        println!("\nPossible duplicates:");
+        for p in &possible {
+            let score = p.possible_duplicate_score.unwrap_or(0.0);
+            println!("  [{}] {}  ({:.2})", p.id, p.name, score);
+        }
+    }
+
     println!("\nScore items to move to active: pm score <id> -i <1-10> -m <1-10> -r <0-100>");
 }
 

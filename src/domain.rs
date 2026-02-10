@@ -21,6 +21,7 @@ pub struct Project {
     pub path: Option<String>,
     pub deleted_at: Option<chrono::NaiveDate>,
     pub duplicate_of: Option<i64>,
+    pub possible_duplicate_score: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +81,7 @@ mod tests {
             path: None,
             deleted_at: None,
             duplicate_of: None,
+            possible_duplicate_score: None,
         }
     }
 

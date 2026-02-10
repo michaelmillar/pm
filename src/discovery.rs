@@ -8,6 +8,7 @@ use std::path::Path;
 
 const AUTO_MERGE_THRESHOLD: f32 = 0.90;
 const AUTO_NAME_THRESHOLD: f32 = 0.85;
+const FLAG_THRESHOLD: f32 = 0.80;
 
 pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error>> {
     let existing_projects = store.list_projects_for_dedupe()?;
@@ -59,6 +60,8 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
         if let Some((candidate_id, score, name_score)) = best_match {
             if score >= AUTO_MERGE_THRESHOLD && name_score >= AUTO_NAME_THRESHOLD {
                 store.mark_duplicate(id, candidate_id)?;
+            } else if score >= FLAG_THRESHOLD {
+                store.mark_possible_duplicate(id, score)?;
             }
         }
 
