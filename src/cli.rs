@@ -78,6 +78,11 @@ enum Commands {
         /// Project ID
         id: i64,
     },
+    /// Move a project back to inbox
+    Unscore {
+        /// Project ID
+        id: i64,
+    },
     /// Rename a project
     Rename {
         /// Project ID
@@ -143,6 +148,7 @@ pub fn run() {
         Commands::Remove { id } => cmd_remove(&store, id),
         Commands::Trash => cmd_trash(&store),
         Commands::Restore { id } => cmd_restore(&store, id),
+        Commands::Unscore { id } => cmd_unscore(&store, id),
         Commands::Rename { id, name } => cmd_rename(&store, id, &name),
         Commands::Park { id, reason } => cmd_park(&store, id, &reason),
         Commands::Tasks { id } => cmd_tasks(&store, id),
@@ -230,6 +236,15 @@ fn cmd_done(store: &Store, id: i64) {
         return;
     }
     println!("Marked progress on project {}. Keep shipping!", id);
+}
+
+fn cmd_unscore(store: &Store, id: i64) {
+    let count = store.move_to_inbox(id).unwrap();
+    if count == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
+    println!("Project {} moved to inbox", id);
 }
 
 fn cmd_add(store: &Store, name: &str) {
