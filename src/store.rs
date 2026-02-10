@@ -287,6 +287,20 @@ impl Store {
         Ok(projects)
     }
 
+    pub fn list_projects_for_dedupe(&self) -> Result<Vec<Project>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of
+             FROM projects WHERE deleted_at IS NULL",
+        )?;
+
+        let mut projects = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            projects.push(Self::row_to_project(row)?);
+        }
+        Ok(projects)
+    }
+
     pub fn purge_old_deleted(&self, days: i64) -> Result<usize> {
         let cutoff = (chrono::Local::now().date_naive() - chrono::Duration::days(days)).to_string();
         let count = self.conn.execute(
