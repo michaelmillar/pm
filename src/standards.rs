@@ -1,8 +1,9 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/home/markw/projects/pm-standards.yml";
+pub const DEFAULT_REPORT_PATH: &str = "/home/markw/projects/.pm-standards-report.json";
 
 #[derive(Debug, Deserialize)]
 pub struct StandardsConfig {
@@ -37,10 +38,22 @@ pub struct StandardsReport {
     pub missing: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct RepoStandardsReport {
+    pub name: String,
+    pub path: String,
+    pub requirements_met: usize,
+    pub nice_to_haves_met: usize,
+    pub readiness_boost: u8,
+    pub fixes: Vec<String>,
+    pub missing: Vec<String>,
+}
+
 #[derive(Debug)]
 pub enum StandardsError {
     Io(std::io::Error),
     Yaml(serde_yaml::Error),
+    Json(serde_json::Error),
 }
 
 impl StandardsConfig {
@@ -49,7 +62,8 @@ impl StandardsConfig {
     }
 
     pub fn load() -> Result<Self, StandardsError> {
-        let path = std::env::var("PM_STANDARDS_CONFIG").unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
+        let path = std::env::var("PM_STANDARDS_CONFIG")
+            .unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
         load_from_path(Path::new(&path))
     }
 }
@@ -59,30 +73,21 @@ pub fn load_from_path(path: &Path) -> Result<StandardsConfig, StandardsError> {
     StandardsConfig::from_str(&content).map_err(StandardsError::Yaml)
 }
 
+pub fn write_report(path: &Path, reports: &[RepoStandardsReport]) -> Result<(), StandardsError> {
+    let content = serde_json::to_string_pretty(reports).map_err(StandardsError::Json)?;
+    std::fs::write(path, content).map_err(StandardsError::Io)
+}
+
 pub fn evaluate_repo(path: &Path, cfg: &StandardsConfig) -> Result<StandardsReport, StandardsError> {
     let mut report = StandardsReport::default();
 
-    for check in &cfg.requirements {
-        if check_path(path, &check.check) {
-            report.requirements_met += 1;
-        } else {
-            if let Some(fix) = try_fix(path, &check.check) {
-                report.fixes.push(fix);
-                report.requirements_met += 1;
-            } else {
-                report.missing.push(check.name.clone());
-            }
-        }
-    }
+    apply_checks(path, &cfg.requirements, true, &mut report);
+    apply_checks(path, &cfg.nice_to_haves, false, &mut report);
 
-    for check in &cfg.nice_to_haves {
-        if check_path(path, &check.check) {
-            report.nice_to_haves_met += 1;
-        } else if let Some(fix) = try_fix(path, &check.check) {
-            report.fixes.push(fix);
-            report.nice_to_haves_met += 1;
-        } else {
-            report.missing.push(check.name.clone());
+    for language in detect_languages(path) {
+        if let Some(lang_checks) = cfg.languages.get(language) {
+            apply_checks(path, &lang_checks.requirements, true, &mut report);
+            apply_checks(path, &lang_checks.nice_to_haves, false, &mut report);
         }
     }
 
@@ -90,6 +95,41 @@ pub fn evaluate_repo(path: &Path, cfg: &StandardsConfig) -> Result<StandardsRepo
     report.readiness_boost = boost.min(20);
 
     Ok(report)
+}
+
+fn apply_checks(path: &Path, checks: &[Check], required: bool, report: &mut StandardsReport) {
+    for check in checks {
+        if check_path(path, &check.check) {
+            if required {
+                report.requirements_met += 1;
+            } else {
+                report.nice_to_haves_met += 1;
+            }
+        } else if let Some(fix) = try_fix(path, &check.check) {
+            report.fixes.push(fix);
+            if required {
+                report.requirements_met += 1;
+            } else {
+                report.nice_to_haves_met += 1;
+            }
+        } else {
+            report.missing.push(check.name.clone());
+        }
+    }
+}
+
+fn detect_languages(path: &Path) -> Vec<&'static str> {
+    let mut langs = Vec::new();
+    if path_exists(path, "Cargo.toml") {
+        langs.push("rust");
+    }
+    if path_exists(path, "mix.exs") {
+        langs.push("elixir");
+    }
+    if path_exists(path, "package.json") {
+        langs.push("js");
+    }
+    langs
 }
 
 fn check_path(base: &Path, check: &str) -> bool {

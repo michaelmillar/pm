@@ -2,7 +2,9 @@ use crate::charter;
 use crate::cli_core::{score_project, ScoreResult};
 use crate::discovery;
 use crate::domain::{ProjectState, TaskSource};
+use crate::naming;
 use crate::scanner;
+use crate::standards;
 use crate::store::Store;
 use chrono::Local;
 use clap::{Parser, Subcommand};
@@ -227,6 +229,14 @@ pub fn cmd_status(store: &Store) {
             days_stale
         );
     }
+
+    let suggestions = collect_naming_suggestions(&projects);
+    if !suggestions.is_empty() {
+        println!("\nNaming suggestions:");
+        for (id, name, ideas) in suggestions {
+            println!("  [{}] {} -> {}", id, name, ideas.join(", "));
+        }
+    }
 }
 
 fn cmd_done(store: &Store, id: i64) {
@@ -352,7 +362,71 @@ fn cmd_inbox(store: &Store) {
         }
     }
 
+    let suggestions = collect_naming_suggestions(&projects);
+    if !suggestions.is_empty() {
+        println!("\nNaming suggestions:");
+        for (id, name, ideas) in suggestions {
+            println!("  [{}] {} -> {}", id, name, ideas.join(", "));
+        }
+    }
+
     println!("\nScore items to move to active: pm score <id> -i <1-10> -m <1-10> -r <0-100>");
+}
+
+fn collect_naming_suggestions(
+    projects: &[crate::domain::Project],
+) -> Vec<(i64, String, Vec<String>)> {
+    let mut out = Vec::new();
+    for p in projects {
+        let Some(path) = &p.path else {
+            continue;
+        };
+        let repo_path = Path::new(path);
+        if !repo_path.is_dir() {
+            continue;
+        }
+        let readme = read_readme_text(repo_path);
+        let plans = read_plans_text(repo_path);
+        let ideas = naming::suggest_names(&p.name, &readme, &plans);
+        if !ideas.is_empty() {
+            out.push((p.id, p.name.clone(), ideas));
+        }
+    }
+    out
+}
+
+fn read_readme_text(repo_path: &Path) -> String {
+    if let Ok(entries) = std::fs::read_dir(repo_path) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_lowercase();
+            if file_name.starts_with("readme") {
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    return content;
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn read_plans_text(repo_path: &Path) -> String {
+    let plans_dir = repo_path.join("docs").join("plans");
+    if !plans_dir.is_dir() {
+        return String::new();
+    }
+    let mut combined = String::new();
+    if let Ok(entries) = std::fs::read_dir(plans_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "md").unwrap_or(false) {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    combined.push_str(&content);
+                    combined.push('\n');
+                }
+            }
+        }
+    }
+    combined
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -408,6 +482,8 @@ fn cmd_scan(store: &Store) {
         return;
     }
 
+    let standards_config = standards::StandardsConfig::load().ok();
+
     println!("Scanning {} linked projects...\n", projects.len());
 
     for p in &projects {
@@ -425,11 +501,18 @@ fn cmd_scan(store: &Store) {
             };
 
             // Preserve manual scores: only update if scan shows progress OR no manual score exists
-            let readiness = if result.completed_tasks > 0 || p.readiness == 0 {
+            let mut readiness = if result.completed_tasks > 0 || p.readiness == 0 {
                 scan_readiness
             } else {
                 p.readiness // Keep manual score when scan finds 0 completed
             };
+
+            if let Some(cfg) = &standards_config {
+                if let Ok(report) = standards::evaluate_repo(Path::new(path), cfg) {
+                    let boosted = readiness as i32 + report.readiness_boost as i32;
+                    readiness = boosted.min(100) as u8;
+                }
+            }
 
             // Update last activity from git if available
             let last_activity = result.last_commit_date.unwrap_or(p.last_activity);

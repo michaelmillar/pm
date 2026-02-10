@@ -13,6 +13,7 @@ const FLAG_THRESHOLD: f32 = 0.80;
 
 pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error>> {
     let standards_config = standards::StandardsConfig::load().ok();
+    let mut standards_reports: Vec<standards::RepoStandardsReport> = Vec::new();
     let existing_projects = store.list_projects_for_dedupe()?;
     let entries = std::fs::read_dir(root)?;
     for entry in entries.flatten() {
@@ -78,9 +79,24 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
         if let Some(cfg) = &standards_config {
             if let Ok(report) = standards::evaluate_repo(&path, cfg) {
                 readiness = (readiness + report.readiness_boost as i32).min(100);
+                standards_reports.push(standards::RepoStandardsReport {
+                    name: name.clone(),
+                    path: path_str.clone(),
+                    requirements_met: report.requirements_met,
+                    nice_to_haves_met: report.nice_to_haves_met,
+                    readiness_boost: report.readiness_boost,
+                    fixes: report.fixes.clone(),
+                    missing: report.missing.clone(),
+                });
             }
         }
         store.update_scores(id, score.impact, score.monetization, readiness as u8)?;
+    }
+
+    if standards_config.is_some() && !standards_reports.is_empty() {
+        let report_path = std::env::var("PM_STANDARDS_REPORT")
+            .unwrap_or_else(|_| standards::DEFAULT_REPORT_PATH.to_string());
+        let _ = standards::write_report(Path::new(&report_path), &standards_reports);
     }
 
     Ok(())

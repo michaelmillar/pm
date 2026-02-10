@@ -3,6 +3,7 @@ pub mod cli_core;
 pub mod cli;
 pub mod discovery;
 pub mod domain;
+pub mod naming;
 pub mod similarity;
 pub mod standards;
 pub mod scanner;
