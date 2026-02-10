@@ -206,8 +206,8 @@ fn cmd_next(store: &Store) {
 }
 
 pub fn cmd_status(store: &Store) {
-    let root = Path::new("/home/markw/projects");
-    let _ = discovery::discover_projects(store, root);
+    let root = resolve_root_dir();
+    let _ = discovery::discover_projects(store, &root);
 
     let projects = store.list_active_projects().unwrap();
     if projects.is_empty() {
@@ -237,6 +237,13 @@ pub fn cmd_status(store: &Store) {
             println!("  [{}] {} -> {}", id, name, ideas.join(", "));
         }
     }
+}
+
+fn resolve_root_dir() -> PathBuf {
+    if let Ok(val) = std::env::var("PM_ROOT") {
+        return PathBuf::from(val);
+    }
+    PathBuf::from("/home/markw/projects")
 }
 
 fn cmd_done(store: &Store, id: i64) {
@@ -344,7 +351,9 @@ fn cmd_why(store: &Store) {
 
 fn cmd_inbox(store: &Store) {
     let projects = store.list_inbox_projects().unwrap();
-    if projects.is_empty() {
+    let root = resolve_root_dir();
+    let untracked = discovery::list_nonrepo_folders(&root);
+    if projects.is_empty() && untracked.is_empty() {
         println!("Inbox empty. Add ideas with: pm add \"idea\"");
         return;
     }
@@ -367,6 +376,13 @@ fn cmd_inbox(store: &Store) {
         println!("\nNaming suggestions:");
         for (id, name, ideas) in suggestions {
             println!("  [{}] {} -> {}", id, name, ideas.join(", "));
+        }
+    }
+
+    if !untracked.is_empty() {
+        println!("\nUntracked folders:");
+        for name in untracked {
+            println!("  {}", name);
         }
     }
 

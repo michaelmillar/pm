@@ -6,10 +6,22 @@ use crate::store::Store;
 use chrono::Local;
 use std::error::Error;
 use std::path::Path;
+use std::collections::HashSet;
 
 const AUTO_MERGE_THRESHOLD: f32 = 0.90;
 const AUTO_NAME_THRESHOLD: f32 = 0.85;
 const FLAG_THRESHOLD: f32 = 0.80;
+
+const DEFAULT_IGNORED_FOLDERS: &[&str] = &[
+    ".git",
+    ".worktrees",
+    "node_modules",
+    "target",
+    "_build",
+    "deps",
+    "docs",
+    "vendor",
+];
 
 pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error>> {
     let standards_config = standards::StandardsConfig::load().ok();
@@ -100,6 +112,36 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
     }
 
     Ok(())
+}
+
+pub fn list_nonrepo_folders(root: &Path) -> Vec<String> {
+    let ignored: HashSet<&str> = DEFAULT_IGNORED_FOLDERS.iter().copied().collect();
+    let mut results = Vec::new();
+    let entries = match std::fs::read_dir(root) {
+        Ok(e) => e,
+        Err(_) => return results,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = match path.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
+        if ignored.contains(name.as_str()) {
+            continue;
+        }
+        if path.join(".git").is_dir() {
+            continue;
+        }
+        results.push(name);
+    }
+
+    results.sort();
+    results
 }
 
 #[derive(Debug, Default)]
