@@ -184,6 +184,10 @@ impl Store {
         Ok(count)
     }
 
+    pub fn move_to_inbox(&self, id: i64) -> Result<usize> {
+        self.update_state(id, ProjectState::Inbox)
+    }
+
     pub fn touch_project(&self, id: i64) -> Result<usize> {
         let today = chrono::Local::now().date_naive().to_string();
         let count = self.conn.execute(
