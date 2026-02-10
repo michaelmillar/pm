@@ -107,6 +107,33 @@ impl Store {
         Ok(projects)
     }
 
+    pub fn get_project_by_path(&self, path: &str) -> Result<Option<Project>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at
+             FROM projects WHERE path = ?1 AND deleted_at IS NULL",
+        )?;
+
+        let mut rows = stmt.query(params![path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Self::row_to_project(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_or_create_by_path(&self, name: &str, path: &str) -> Result<i64> {
+        if let Some(project) = self.get_project_by_path(path)? {
+            return Ok(project.id);
+        }
+
+        let today = chrono::Local::now().date_naive().to_string();
+        self.conn.execute(
+            "INSERT INTO projects (name, state, impact, monetization, readiness, last_activity, created_at, path)
+             VALUES (?1, 'inbox', 5, 5, 0, ?2, ?2, ?3)",
+            params![name, today, path],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
     pub fn link_project(&self, id: i64, path: &str) -> Result<usize> {
         let count = self.conn.execute(
             "UPDATE projects SET path = ?1 WHERE id = ?2",
