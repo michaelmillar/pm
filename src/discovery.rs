@@ -1,6 +1,7 @@
 use crate::cli_core;
 use crate::similarity;
 use crate::scanner;
+use crate::standards;
 use crate::store::Store;
 use chrono::Local;
 use std::error::Error;
@@ -11,6 +12,7 @@ const AUTO_NAME_THRESHOLD: f32 = 0.85;
 const FLAG_THRESHOLD: f32 = 0.80;
 
 pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error>> {
+    let standards_config = standards::StandardsConfig::load().ok();
     let existing_projects = store.list_projects_for_dedupe()?;
     let entries = std::fs::read_dir(root)?;
     for entry in entries.flatten() {
@@ -72,7 +74,13 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
             None => continue,
         };
         let score = cli_core::auto_score(&scan, project.created_at, today);
-        store.update_scores(id, score.impact, score.monetization, score.readiness)?;
+        let mut readiness = score.readiness as i32;
+        if let Some(cfg) = &standards_config {
+            if let Ok(report) = standards::evaluate_repo(&path, cfg) {
+                readiness = (readiness + report.readiness_boost as i32).min(100);
+            }
+        }
+        store.update_scores(id, score.impact, score.monetization, readiness as u8)?;
     }
 
     Ok(())

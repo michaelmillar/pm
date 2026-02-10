@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub const DEFAULT_CONFIG_PATH: &str = "/home/markw/projects/pm-standards.yml";
+
 #[derive(Debug, Deserialize)]
 pub struct StandardsConfig {
     #[serde(default)]
@@ -38,12 +40,23 @@ pub struct StandardsReport {
 #[derive(Debug)]
 pub enum StandardsError {
     Io(std::io::Error),
+    Yaml(serde_yaml::Error),
 }
 
 impl StandardsConfig {
     pub fn from_str(input: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(input)
     }
+
+    pub fn load() -> Result<Self, StandardsError> {
+        let path = std::env::var("PM_STANDARDS_CONFIG").unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
+        load_from_path(Path::new(&path))
+    }
+}
+
+pub fn load_from_path(path: &Path) -> Result<StandardsConfig, StandardsError> {
+    let content = std::fs::read_to_string(path).map_err(StandardsError::Io)?;
+    StandardsConfig::from_str(&content).map_err(StandardsError::Yaml)
 }
 
 pub fn evaluate_repo(path: &Path, cfg: &StandardsConfig) -> Result<StandardsReport, StandardsError> {
