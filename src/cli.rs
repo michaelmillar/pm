@@ -1,5 +1,6 @@
 use crate::charter;
 use crate::cli_core::{score_project, ScoreResult};
+use crate::discovery;
 use crate::domain::{ProjectState, TaskSource};
 use crate::scanner;
 use crate::store::Store;
@@ -196,7 +197,10 @@ fn cmd_next(store: &Store) {
     println!("└─────────────────────────────────────────────────┘");
 }
 
-fn cmd_status(store: &Store) {
+pub fn cmd_status(store: &Store) {
+    let root = Path::new("/home/markw/projects");
+    let _ = discovery::discover_projects(store, root);
+
     let projects = store.list_active_projects().unwrap();
     if projects.is_empty() {
         println!("No active projects.");
