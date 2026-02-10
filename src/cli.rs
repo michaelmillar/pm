@@ -1050,6 +1050,11 @@ mod tests {
     fn test_cmd_scan_updates_readiness() {
         let store = Store::open_in_memory().unwrap();
         let tmp = TempDir::new().unwrap();
+        let standards = tmp.path().join("standards.yml");
+        std::fs::write(&standards, "requirements: []\nnice_to_haves: []\n").unwrap();
+        unsafe {
+            std::env::set_var("PM_STANDARDS_CONFIG", &standards);
+        }
 
         // init git repo
         Command::new("git")
