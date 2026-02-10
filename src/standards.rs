@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct StandardsConfig {
@@ -23,8 +24,68 @@ pub struct Check {
     pub check: String,
 }
 
+#[derive(Debug, Default, PartialEq)]
+pub struct StandardsReport {
+    pub requirements_met: usize,
+    pub nice_to_haves_met: usize,
+    pub readiness_boost: u8,
+    pub fixes: Vec<String>,
+    pub missing: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum StandardsError {
+    Io(std::io::Error),
+}
+
 impl StandardsConfig {
     pub fn from_str(input: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(input)
     }
+}
+
+pub fn evaluate_repo(path: &Path, cfg: &StandardsConfig) -> Result<StandardsReport, StandardsError> {
+    let mut report = StandardsReport::default();
+
+    for check in &cfg.requirements {
+        if check_path(path, &check.check) {
+            report.requirements_met += 1;
+        } else {
+            report.missing.push(check.name.clone());
+        }
+    }
+
+    for check in &cfg.nice_to_haves {
+        if check_path(path, &check.check) {
+            report.nice_to_haves_met += 1;
+        } else {
+            report.missing.push(check.name.clone());
+        }
+    }
+
+    let boost = (report.requirements_met * 2 + report.nice_to_haves_met) as u8;
+    report.readiness_boost = boost.min(20);
+
+    Ok(report)
+}
+
+fn check_path(base: &Path, check: &str) -> bool {
+    match check {
+        "readme" => path_exists(base, "README.md"),
+        "license" => path_exists(base, "LICENSE"),
+        "agents_md" => path_exists(base, "AGENTS.md"),
+        "docs_dir" => base.join("docs").is_dir(),
+        "docs_plans_dir" => base.join("docs").join("plans").is_dir(),
+        "ci" | "ci_config" => base.join(".github").join("workflows").is_dir(),
+        "tests_dir" => base.join("tests").is_dir(),
+        "cargo_toml" => path_exists(base, "Cargo.toml"),
+        "mix_exs" => path_exists(base, "mix.exs"),
+        "package_json" => path_exists(base, "package.json"),
+        _ => false,
+    }
+}
+
+fn path_exists(base: &Path, name: &str) -> bool {
+    let path = PathBuf::from(base).join(name);
+    path.exists()
 }
