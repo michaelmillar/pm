@@ -101,7 +101,7 @@ fn count_tasks_in_plan(
     let mut completed = 0;
 
     for line in content.lines() {
-        if line.starts_with("### Task") && line.contains(':') {
+        if (line.starts_with("## Task") || line.starts_with("### Task")) && line.contains(':') {
             total += 1;
 
             // Check manual progress first
@@ -246,7 +246,7 @@ pub fn list_tasks(project_path: &Path) -> Vec<TaskStatus> {
 
         let mut task_num = 0;
         for line in content.lines() {
-            if line.starts_with("### Task") && line.contains(':') {
+            if (line.starts_with("## Task") || line.starts_with("### Task")) && line.contains(':') {
                 task_num += 1;
                 let desc = line
                     .split(':')
