@@ -41,6 +41,9 @@ enum Commands {
         /// Add a component: name and relative path
         #[arg(long, value_names = ["NAME", "PATH"], num_args = 2)]
         add_component: Option<Vec<String>>,
+        /// Overwrite existing roadmap.yaml
+        #[arg(long)]
+        force: bool,
     },
     /// Show scoring rubric and open roadmap.yaml for research
     Research {
@@ -132,7 +135,7 @@ pub fn run() {
         Commands::Status => cmd_status(&store),
         Commands::Done { id } => cmd_done(&store, id),
         Commands::Add { name } => cmd_add(&store, &name),
-        Commands::Roadmap { id, add_component } => cmd_roadmap(&store, id, add_component),
+        Commands::Roadmap { id, add_component, force } => cmd_roadmap(&store, id, add_component, force),
         Commands::Research { id } => cmd_research(&store, id),
         Commands::Throne => cmd_throne(&store),
         Commands::Why => cmd_why(&store),
@@ -277,7 +280,7 @@ fn cmd_add(store: &Store, name: &str) {
     );
 }
 
-fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>) {
+fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>, force: bool) {
     let project = match store.get_project(id).unwrap() {
         Some(p) => p,
         None => { println!("Project {} not found", id); return; }
@@ -316,9 +319,9 @@ fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>) {
         return;
     }
 
-    if yaml_path.exists() {
+    if yaml_path.exists() && !force {
         println!("docs/roadmap.yaml already exists for '{}'.", project.name);
-        println!("Edit it directly, or use --add-component to register a new repo.");
+        println!("Edit it directly, use --add-component to register a new repo, or --force to rebuild from plan files.");
         return;
     }
 
