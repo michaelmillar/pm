@@ -323,11 +323,147 @@ fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>) {
     }
 
     std::fs::create_dir_all(&docs_dir).expect("create docs/");
-    let template = roadmap::scaffold_template(&project.name);
-    std::fs::write(&yaml_path, template).expect("write roadmap.yaml");
+
+    let tasks = scanner::list_tasks(project_path);
+    let yaml = if tasks.is_empty() {
+        println!("No plan files found in docs/plans/ — generating blank template.");
+        roadmap::scaffold_template(&project.name)
+    } else {
+        // Show what we found
+        let mut phase_order: Vec<String> = Vec::new();
+        for t in &tasks {
+            if !phase_order.contains(&t.plan_file) {
+                phase_order.push(t.plan_file.clone());
+            }
+        }
+        println!("Building roadmap from {} plan file(s):\n", phase_order.len());
+        for plan in &phase_order {
+            let total = tasks.iter().filter(|t| &t.plan_file == plan).count();
+            let done = tasks.iter().filter(|t| &t.plan_file == plan && t.source != crate::domain::TaskSource::Pending).count();
+            let (_, label) = phase_label_from_filename(plan);
+            println!("  {} — {}/{} done", label, done, total);
+        }
+        println!();
+
+        // Interactive assessment prompts
+        println!("Assessment scores (Enter to use default):");
+        let impact       = prompt_score("  Impact       (1-10, how many people need this?)  ").unwrap_or(7);
+        let monetization = prompt_score("  Monetization (1-10, how well can it be monetised?)").unwrap_or(7);
+        let cloneability = prompt_score("  Cloneability (1-10, how hard to copy the value?) ").unwrap_or(6);
+
+        build_roadmap_yaml(&project.name, &tasks, &phase_order, impact, monetization, cloneability)
+    };
+
+    std::fs::write(&yaml_path, yaml).expect("write roadmap.yaml");
     store.update_state(id, crate::domain::ProjectState::Active).ok();
-    println!("Created docs/roadmap.yaml for '{}'.", project.name);
-    println!("Fill in phases and tasks, then run 'pm research {}' for the scoring rubric.", id);
+    println!("\nCreated docs/roadmap.yaml for '{}'.", project.name);
+    println!("Review weights in the file, then run 'pm show {}' to see live readiness.", id);
+}
+
+fn phase_label_from_filename(filename: &str) -> (String, String) {
+    let stem = filename.trim_end_matches(".md");
+    // Strip YYYY-MM-DD- date prefix if present
+    let stripped = if stem.len() > 10
+        && stem.as_bytes().get(4) == Some(&b'-')
+        && stem.as_bytes().get(7) == Some(&b'-')
+        && stem.as_bytes().get(10) == Some(&b'-')
+    {
+        &stem[11..]
+    } else {
+        stem
+    };
+    let id = stripped.replace('_', "-").to_lowercase();
+    let label = id
+        .split('-')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut chars = w.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (id, label)
+}
+
+fn prompt_score(question: &str) -> Option<u8> {
+    use std::io::Write;
+    print!("{}: ", question);
+    std::io::stdout().flush().ok();
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_err() {
+        return None;
+    }
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse::<u8>().ok().filter(|&n| (1..=10).contains(&n))
+}
+
+fn build_roadmap_yaml(
+    project_name: &str,
+    tasks: &[crate::domain::TaskStatus],
+    phase_order: &[String],
+    impact: u8,
+    monetization: u8,
+    cloneability: u8,
+) -> String {
+    let today = Local::now().date_naive();
+    let n = phase_order.len();
+    let total_tasks: usize = tasks.len();
+
+    let mut yaml = format!(
+        "project: {name}\nassessment:\n  impact: {impact}\n  monetization: {monetization}\n  cloneability: {cloneability}\n  researched_at: \"{today}\"\n  reasoning: |\n    Impact {impact}: (fill in reasoning)\n    Monetization {monetization}: (fill in reasoning)\n    Cloneability {cloneability}: (fill in reasoning)\n  signals:\n    - \"(add market evidence here)\"\n\nphases:\n",
+        name = project_name,
+        impact = impact,
+        monetization = monetization,
+        cloneability = cloneability,
+        today = today,
+    );
+
+    for (i, plan_file) in phase_order.iter().enumerate() {
+        let phase_tasks: Vec<_> = tasks.iter().filter(|t| &t.plan_file == plan_file).collect();
+        let (phase_id, phase_label) = phase_label_from_filename(plan_file);
+
+        // Weight proportional to task count; last phase absorbs rounding remainder
+        let weight = if n == 1 {
+            1.0f64
+        } else if i == n - 1 {
+            let so_far: f64 = phase_order[..i].iter().map(|pf| {
+                let cnt = tasks.iter().filter(|t| &t.plan_file == pf).count();
+                (cnt as f64 / total_tasks as f64 * 100.0).round() / 100.0
+            }).sum();
+            (1.0 - so_far).max(0.01)
+        } else {
+            let cnt = phase_tasks.len();
+            (cnt as f64 / total_tasks as f64 * 100.0).round() / 100.0
+        };
+
+        yaml.push_str(&format!(
+            "  - id: {id}\n    label: {label}\n    weight: {weight:.2}\n    tasks:\n",
+            id = phase_id,
+            label = phase_label,
+            weight = weight,
+        ));
+
+        for task in &phase_tasks {
+            let task_id = format!("{}-{}", phase_id, task.task_number);
+            let done = task.source != crate::domain::TaskSource::Pending;
+            let label = task.description.replace('"', "'");
+            yaml.push_str(&format!(
+                "      - id: {task_id}\n        label: \"{label}\"\n        done: {done}\n",
+                task_id = task_id,
+                label = label,
+                done = done,
+            ));
+        }
+        yaml.push('\n');
+    }
+
+    yaml
 }
 
 fn cmd_research(store: &Store, id: i64) {
