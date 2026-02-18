@@ -6,5 +6,6 @@ pub mod domain;
 pub mod naming;
 pub mod similarity;
 pub mod standards;
+pub mod roadmap;
 pub mod scanner;
 pub mod store;

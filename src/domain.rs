@@ -22,6 +22,7 @@ pub struct Project {
     pub deleted_at: Option<chrono::NaiveDate>,
     pub duplicate_of: Option<i64>,
     pub possible_duplicate_score: Option<f32>,
+    pub cloneability: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +58,7 @@ impl Project {
         (self.impact as i32 * 3)
             + (self.monetization as i32 * 2)
             + (self.readiness as i32 / 10 * 4)
+            + self.cloneability.unwrap_or(5) as i32
             - staleness_penalty
     }
 }
@@ -82,6 +84,7 @@ mod tests {
             deleted_at: None,
             duplicate_of: None,
             possible_duplicate_score: None,
+            cloneability: None,
         }
     }
 

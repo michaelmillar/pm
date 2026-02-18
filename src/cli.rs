@@ -1,6 +1,6 @@
 use crate::charter;
-use crate::cli_core::{score_project, ScoreResult};
 use crate::discovery;
+use crate::roadmap;
 use crate::domain::{ProjectState, TaskSource};
 use crate::naming;
 use crate::scanner;
@@ -34,19 +34,18 @@ enum Commands {
         /// Project name
         name: String,
     },
-    /// Score a project (sets impact, monetization, readiness)
-    Score {
+    /// Scaffold or update docs/roadmap.yaml for a project
+    Roadmap {
         /// Project ID
         id: i64,
-        /// Impact score 1-10
-        #[arg(short, long)]
-        impact: u8,
-        /// Monetization score 1-10
-        #[arg(short, long)]
-        monetization: u8,
-        /// Readiness percentage 0-100
-        #[arg(short, long)]
-        readiness: u8,
+        /// Add a component: name and relative path
+        #[arg(long, value_names = ["NAME", "PATH"], num_args = 2)]
+        add_component: Option<Vec<String>>,
+    },
+    /// Show scoring rubric and open roadmap.yaml for research
+    Research {
+        /// Project ID
+        id: i64,
     },
     /// Show your top 3 priority projects
     Throne,
@@ -133,14 +132,8 @@ pub fn run() {
         Commands::Status => cmd_status(&store),
         Commands::Done { id } => cmd_done(&store, id),
         Commands::Add { name } => cmd_add(&store, &name),
-        Commands::Score {
-            id,
-            impact,
-            monetization,
-            readiness,
-        } => {
-            cmd_score(&store, id, impact, monetization, readiness)
-        }
+        Commands::Roadmap { id, add_component } => cmd_roadmap(&store, id, add_component),
+        Commands::Research { id } => cmd_research(&store, id),
         Commands::Throne => cmd_throne(&store),
         Commands::Why => cmd_why(&store),
         Commands::Inbox => cmd_inbox(&store),
@@ -179,12 +172,22 @@ fn resolve_data_dir() -> PathBuf {
         .join("pm")
 }
 
+fn enrich_with_roadmap(project: &mut crate::domain::Project) {
+    let Some(ref path) = project.path else { return; };
+    let Some(scores) = roadmap::load_scores(std::path::Path::new(path)) else { return; };
+    project.readiness = scores.readiness;
+    if let Some(v) = scores.impact { project.impact = v; }
+    if let Some(v) = scores.monetization { project.monetization = v; }
+    project.cloneability = scores.cloneability;
+}
+
 fn cmd_next(store: &Store) {
-    let projects = store.list_active_projects().unwrap();
+    let mut projects = store.list_active_projects().unwrap();
     if projects.is_empty() {
         println!("No active projects. Add one with: pm add \"project name\"");
         return;
     }
+    for p in &mut projects { enrich_with_roadmap(p); }
 
     let today = Local::now().date_naive();
     let mut scored: Vec<_> = projects.iter().map(|p| (p, p.priority_score(today))).collect();
@@ -209,7 +212,8 @@ pub fn cmd_status(store: &Store) {
     let root = resolve_root_dir();
     let _ = discovery::discover_projects(store, &root);
 
-    let projects = store.list_active_projects().unwrap();
+    let mut projects = store.list_active_projects().unwrap();
+    for p in &mut projects { enrich_with_roadmap(p); }
     if projects.is_empty() {
         println!("No active projects.");
         return;
@@ -268,33 +272,112 @@ fn cmd_add(store: &Store, name: &str) {
     let id = store.add_project(name).unwrap();
     println!("Added project '{}' to inbox (id: {})", name, id);
     println!(
-        "Score it with: pm score {} -i <impact> -m <monetization> -r <readiness>",
-        id
+        "Link and create a roadmap: pm link {} <path> && pm roadmap {}",
+        id, id
     );
 }
 
-fn cmd_score(store: &Store, id: i64, impact: u8, monetization: u8, readiness: u8) {
-    match score_project(store, id, impact, monetization, readiness).unwrap() {
-        ScoreResult::Updated { id } => {
-            println!("Updated project {} and moved to active.", id);
+fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => {
+            println!("Project '{}' is not linked to a codebase.", project.name);
+            println!("Link first: pm link {} <path>", id);
+            return;
         }
-        ScoreResult::NotFound { id } => {
-            println!("Project {} not found", id);
+    };
+    let project_path = Path::new(&path);
+    let docs_dir = project_path.join("docs");
+    let yaml_path = docs_dir.join("roadmap.yaml");
+
+    if let Some(parts) = add_component {
+        if !yaml_path.exists() {
+            println!("No roadmap.yaml found. Run 'pm roadmap {}' first.", id);
+            return;
         }
-        ScoreResult::Invalid { field } => {
-            let msg = match field {
-                "impact" => "impact must be 1-10",
-                "monetization" => "monetization must be 1-10",
-                "readiness" => "readiness must be 0-100",
-                _ => "invalid score",
-            };
-            println!("Score error: {}", msg);
-        }
+        let name = &parts[0];
+        let comp_path = &parts[1];
+        let existing = std::fs::read_to_string(&yaml_path).unwrap_or_default();
+        let component_entry = format!(
+            "  - id: {}\n    label: {}\n    path: {}\n",
+            name.to_lowercase().replace(' ', "-"), name, comp_path
+        );
+        let updated = if existing.contains("components:") {
+            existing.replacen("phases:", &format!("{}\nphases:", component_entry), 1)
+        } else {
+            existing.replacen("phases:", &format!("components:\n{}\nphases:", component_entry), 1)
+        };
+        std::fs::write(&yaml_path, updated).expect("write roadmap.yaml");
+        println!("Added component '{}' at '{}' to roadmap.", name, comp_path);
+        return;
+    }
+
+    if yaml_path.exists() {
+        println!("docs/roadmap.yaml already exists for '{}'.", project.name);
+        println!("Edit it directly, or use --add-component to register a new repo.");
+        return;
+    }
+
+    std::fs::create_dir_all(&docs_dir).expect("create docs/");
+    let template = roadmap::scaffold_template(&project.name);
+    std::fs::write(&yaml_path, template).expect("write roadmap.yaml");
+    store.update_state(id, crate::domain::ProjectState::Active).ok();
+    println!("Created docs/roadmap.yaml for '{}'.", project.name);
+    println!("Fill in phases and tasks, then run 'pm research {}' for the scoring rubric.", id);
+}
+
+fn cmd_research(store: &Store, id: i64) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => { println!("Project '{}' is not linked to a codebase.", project.name); return; }
+    };
+    let yaml_path = Path::new(&path).join("docs").join("roadmap.yaml");
+    if !yaml_path.exists() {
+        println!("No roadmap.yaml found for '{}'.", project.name);
+        println!("Run 'pm roadmap {}' to create one first.", id);
+        return;
+    }
+    println!("Research rubric for: {}\n", project.name);
+    println!("Impact (1–10):");
+    println!("  9-10  Large audience (>1M), strong unmet need, no close substitute");
+    println!("  7-8   Clear niche (100K–1M), meaningful differentiation");
+    println!("  5-6   Moderate audience, competitors exist but have real gaps");
+    println!("  3-4   Small or unclear audience, weak differentiation");
+    println!("  1-2   Niche hobby project, unclear who it's for");
+    println!();
+    println!("Monetization (1–10):");
+    println!("  9-10  Comparable paid products at >£20/mo or >£30 one-time");
+    println!("  7-8   Comparable paid products at £5–20/mo or £10–30 one-time");
+    println!("  5-6   Free competitors dominate but paid tier is plausible");
+    println!("  3-4   Hard to monetise; audience expects free");
+    println!("  1-2   No realistic monetisation path");
+    println!();
+    println!("Cloneability (1–10, higher = harder to clone = more defensible):");
+    println!("  9-10  Unique dataset, regulatory moat, or network effects");
+    println!("  7-8   Deep domain expertise or proprietary integration required");
+    println!("  5-6   Replicable with significant engineering effort (6–12 months)");
+    println!("  3-4   Similar tools exist; can be cloned in weeks by a funded team");
+    println!("  1-2   Trivially replicable; no meaningful barrier");
+    println!();
+    println!("Edit: {}", yaml_path.display());
+    if let Ok(editor) = std::env::var("EDITOR") {
+        let _ = std::process::Command::new(&editor).arg(&yaml_path).status();
+    } else {
+        println!("(Set $EDITOR to open automatically)");
     }
 }
 
 fn cmd_throne(store: &Store) {
-    let projects = store.list_active_projects().unwrap();
+    let mut projects = store.list_active_projects().unwrap();
+    for p in &mut projects { enrich_with_roadmap(p); }
     if projects.is_empty() {
         println!("No active projects for the throne.");
         return;
@@ -386,7 +469,7 @@ fn cmd_inbox(store: &Store) {
         }
     }
 
-    println!("\nScore items to move to active: pm score <id> -i <1-10> -m <1-10> -r <0-100>");
+    println!("\nLink and create a roadmap to activate: pm link <id> <path> && pm roadmap <id>");
 }
 
 fn collect_naming_suggestions(
@@ -508,25 +591,29 @@ fn cmd_scan(store: &Store) {
 
             let result = scanner::scan_project(path);
 
-            // Calculate readiness from task completion
-            // Only override manual scores if there's actual progress detected
-            let scan_readiness = if result.total_tasks > 0 {
-                ((result.completed_tasks as f32 / result.total_tasks as f32) * 100.0) as u8
+            // If roadmap.yaml exists, readiness is computed live — skip DB update.
+            let has_roadmap = roadmap::load_roadmap(Path::new(path)).is_some();
+            let mut readiness = if has_roadmap {
+                p.readiness
             } else {
-                0
+                let scan_readiness = if result.total_tasks > 0 {
+                    ((result.completed_tasks as f32 / result.total_tasks as f32) * 100.0) as u8
+                } else {
+                    0
+                };
+                let r = if result.completed_tasks > 0 || p.readiness == 0 {
+                    scan_readiness
+                } else {
+                    p.readiness
+                };
+                r
             };
-
-            // Preserve manual scores: only update if scan shows progress OR no manual score exists
-            let mut readiness = if result.completed_tasks > 0 || p.readiness == 0 {
-                scan_readiness
-            } else {
-                p.readiness // Keep manual score when scan finds 0 completed
-            };
-
-            if let Some(cfg) = &standards_config {
-                if let Ok(report) = standards::evaluate_repo(Path::new(path), cfg) {
-                    let boosted = readiness as i32 + report.readiness_boost as i32;
-                    readiness = boosted.min(100) as u8;
+            if !has_roadmap {
+                if let Some(cfg) = &standards_config {
+                    if let Ok(report) = standards::evaluate_repo(Path::new(path), cfg) {
+                        let boosted = readiness as i32 + report.readiness_boost as i32;
+                        readiness = boosted.min(100) as u8;
+                    }
                 }
             }
 
@@ -581,13 +668,14 @@ fn cmd_scan(store: &Store) {
 }
 
 fn cmd_show(store: &Store, id: i64) {
-    let project = match store.get_project(id).unwrap() {
+    let mut project = match store.get_project(id).unwrap() {
         Some(p) => p,
         None => {
             println!("Project {} not found", id);
             return;
         }
     };
+    enrich_with_roadmap(&mut project);
 
     let today = Local::now().date_naive();
     let days_stale = (today - project.last_activity).num_days();
@@ -600,6 +688,9 @@ fn cmd_show(store: &Store, id: i64) {
     println!("Scores:");
     println!("  Impact:       {}/10", project.impact);
     println!("  Monetization: {}/10", project.monetization);
+    if let Some(c) = project.cloneability {
+        println!("  Cloneability: {}/10", c);
+    }
     println!("  Readiness:    {}%", project.readiness);
     println!("  Priority:     {} (computed)", score);
     println!();
@@ -612,6 +703,33 @@ fn cmd_show(store: &Store, id: i64) {
     println!();
     if let Some(ref path) = project.path {
         println!("Linked to: {}", path);
+
+        // Show roadmap details if present
+        if let Some(rm) = roadmap::load_roadmap(Path::new(path)) {
+            if let Some(bad_sum) = roadmap::validate_weights(&rm) {
+                println!("⚠  Phase weights sum to {:.2} (expected 1.0)", bad_sum);
+            }
+            match &rm.assessment {
+                None => println!("  No assessment — run 'pm research {}' to add scores.", id),
+                Some(a) if roadmap::is_assessment_stale(&a.researched_at) => {
+                    println!("⚠  Assessment is stale. Run 'pm research {}' to refresh.", id);
+                }
+                _ => {}
+            }
+            println!("\nRoadmap phases:");
+            for phase in &rm.phases {
+                if phase.tasks.is_empty() { continue; }
+                let done = phase.tasks.iter().filter(|t| t.done).count();
+                let total = phase.tasks.len();
+                let pct = (done as f64 / total as f64 * 100.0).round() as usize;
+                let bar = progress_bar(pct, 10);
+                let comp = phase.component.as_deref().unwrap_or("—");
+                println!("  {} ({})  {} {}%  [{}/{}]", phase.label, comp, bar, pct, done, total);
+            }
+            println!();
+        } else {
+            println!("  No roadmap.yaml — run 'pm roadmap {}' to enable algorithmic scoring.", id);
+        }
 
         // Show scan info
         let result = scanner::scan_project(path);
@@ -783,7 +901,7 @@ fn cmd_park(store: &Store, id: i64, reason: &str) {
         return;
     }
     println!("Parked '{}'. Reason: {}", project.name, reason);
-    println!("Revive with: pm score {} -i <impact> -m <money> -r <readiness>", id);
+    println!("Revive with: pm roadmap {} (if linked)", id);
 }
 
 fn cmd_tasks(store: &Store, id: i64) {
@@ -1030,16 +1148,15 @@ mod tests {
     }
 
     #[test]
-    fn test_cmd_score_updates_project() {
+    fn test_update_assessment_stores_scores() {
         let store = Store::open_in_memory().unwrap();
-        let id = store.add_project("score-me").unwrap();
-        cmd_score(&store, id, 8, 7, 60);
+        let id = store.add_project("assess-me").unwrap();
+        store.update_assessment(id, 8, 7, Some(6)).unwrap();
 
         let project = store.get_project(id).unwrap().unwrap();
         assert_eq!(project.impact, 8);
         assert_eq!(project.monetization, 7);
-        assert_eq!(project.readiness, 60);
-        assert_eq!(project.state, ProjectState::Active);
+        assert_eq!(project.cloneability, Some(6));
     }
 
     #[test]
