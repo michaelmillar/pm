@@ -327,6 +327,15 @@ fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>, force
 
     std::fs::create_dir_all(&docs_dir).expect("create docs/");
 
+    // Preserve existing assessment block if present (from previous research)
+    let existing_assessment = if yaml_path.exists() {
+        std::fs::read_to_string(&yaml_path)
+            .ok()
+            .and_then(|content| extract_assessment_block(&content))
+    } else {
+        None
+    };
+
     let tasks = scanner::list_tasks(project_path);
     let yaml = if tasks.is_empty() {
         println!("No plan files found in docs/plans/ — generating blank template.");
@@ -348,13 +357,19 @@ fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>, force
         }
         println!();
 
-        // Interactive assessment prompts
-        println!("Assessment scores (Enter to use default):");
-        let impact       = prompt_score("  Impact       (1-10, how many people need this?)  ").unwrap_or(7);
-        let monetization = prompt_score("  Monetization (1-10, how well can it be monetised?)").unwrap_or(7);
-        let cloneability = prompt_score("  Cloneability (1-10, how hard to copy the value?) ").unwrap_or(6);
+        // Use existing assessment or prompt for scores
+        let assessment_block = if let Some(ref existing) = existing_assessment {
+            println!("Using existing assessment (run 'pm research {}' to update).\n", id);
+            existing.clone()
+        } else {
+            println!("Assessment scores (Enter to use default; run 'pm research {}' to research properly):", id);
+            let impact       = prompt_score("  Impact       (1-10, how many people need this?)  ").unwrap_or(7);
+            let monetization = prompt_score("  Monetization (1-10, how well can it be monetised?)").unwrap_or(7);
+            let cloneability = prompt_score("  Cloneability (1-10, how hard to copy the value?) ").unwrap_or(6);
+            default_assessment_block(impact, monetization, cloneability)
+        };
 
-        build_roadmap_yaml(&project.name, &tasks, &phase_order, impact, monetization, cloneability)
+        build_roadmap_yaml(&project.name, &tasks, &phase_order, &assessment_block)
     };
 
     std::fs::write(&yaml_path, yaml).expect("write roadmap.yaml");
@@ -406,25 +421,40 @@ fn prompt_score(question: &str) -> Option<u8> {
     trimmed.parse::<u8>().ok().filter(|&n| (1..=10).contains(&n))
 }
 
-fn build_roadmap_yaml(
-    project_name: &str,
-    tasks: &[crate::domain::TaskStatus],
-    phase_order: &[String],
-    impact: u8,
-    monetization: u8,
-    cloneability: u8,
-) -> String {
-    let today = Local::now().date_naive();
-    let n = phase_order.len();
-    let total_tasks: usize = tasks.len();
+fn extract_assessment_block(yaml_content: &str) -> Option<String> {
+    let start = yaml_content.find("assessment:")?;
+    let end = yaml_content.find("\nphases:")?;
+    if end > start {
+        Some(yaml_content[start..end].trim_end().to_string())
+    } else {
+        None
+    }
+}
 
-    let mut yaml = format!(
-        "project: {name}\nassessment:\n  impact: {impact}\n  monetization: {monetization}\n  cloneability: {cloneability}\n  researched_at: \"{today}\"\n  reasoning: |\n    Impact {impact}: (fill in reasoning)\n    Monetization {monetization}: (fill in reasoning)\n    Cloneability {cloneability}: (fill in reasoning)\n  signals:\n    - \"(add market evidence here)\"\n\nphases:\n",
-        name = project_name,
+fn default_assessment_block(impact: u8, monetization: u8, cloneability: u8) -> String {
+    let today = Local::now().date_naive();
+    format!(
+        "assessment:\n  impact: {impact}\n  monetization: {monetization}\n  cloneability: {cloneability}\n  researched_at: \"{today}\"\n  reasoning: |\n    Impact {impact}: (run 'pm research <id>' to fill in)\n    Monetization {monetization}: (run 'pm research <id>' to fill in)\n    Cloneability {cloneability}: (run 'pm research <id>' to fill in)\n  signals:\n    - \"(add market evidence here)\"",
         impact = impact,
         monetization = monetization,
         cloneability = cloneability,
         today = today,
+    )
+}
+
+fn build_roadmap_yaml(
+    project_name: &str,
+    tasks: &[crate::domain::TaskStatus],
+    phase_order: &[String],
+    assessment_block: &str,
+) -> String {
+    let n = phase_order.len();
+    let total_tasks: usize = tasks.len();
+
+    let mut yaml = format!(
+        "project: {name}\n{assessment}\n\nphases:\n",
+        name = project_name,
+        assessment = assessment_block,
     );
 
     for (i, plan_file) in phase_order.iter().enumerate() {
