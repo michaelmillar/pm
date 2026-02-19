@@ -265,6 +265,74 @@ pub fn parse_dod(content: &str) -> Result<DodFile, String> {
     })
 }
 
+pub fn write_dod(dod: &DodFile) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# {} — Definition of Done\n", dod.project_name));
+    out.push_str("\n## USP\n");
+    out.push_str(&dod.usp);
+    out.push_str("\n\n---\n");
+
+    for criterion in &dod.criteria {
+        out.push_str(&format!(
+            "\n## [{}] {}\n\n",
+            criterion.id, criterion.description
+        ));
+        if let Some(ref ev) = criterion.evidence {
+            out.push_str(&format!("**Evidence:** {}\n\n", ev));
+        }
+        out.push_str("**Scenario:**\n");
+        out.push_str(&criterion.scenario);
+        out.push_str("\n\n");
+        out.push_str(&format_status_line("Automated", &criterion.automated));
+        out.push_str(&format_status_line("Human", &criterion.human));
+    }
+
+    out
+}
+
+fn format_status_line(label: &str, status: &CriterionStatus) -> String {
+    let mut out = String::new();
+    match status {
+        CriterionStatus::Pending => {
+            out.push_str(&format!("**{}:** pending\n", label));
+        }
+        CriterionStatus::Pass { date, rationale } => {
+            out.push_str(&format!("**{}:** pass — {}\n", label, date));
+            if let Some(r) = rationale {
+                for line in r.lines() {
+                    out.push_str(&format!("> {}\n", line));
+                }
+            }
+        }
+        CriterionStatus::Fail { date, rationale } => {
+            out.push_str(&format!("**{}:** fail — {}\n", label, date));
+            if let Some(r) = rationale {
+                for line in r.lines() {
+                    out.push_str(&format!("> {}\n", line));
+                }
+            }
+        }
+        CriterionStatus::Inconclusive { date, rationale } => {
+            out.push_str(&format!("**{}:** inconclusive — {}\n", label, date));
+            if let Some(r) = rationale {
+                for line in r.lines() {
+                    out.push_str(&format!("> {}\n", line));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Returns (complete, total). A criterion is complete when both automated and human are Pass.
+pub fn rollup(dod: &DodFile) -> (usize, usize) {
+    let total = dod.criteria.len();
+    let complete = dod.criteria.iter().filter(|c| {
+        c.automated.is_done() && c.human.is_done()
+    }).count();
+    (complete, total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,5 +494,89 @@ Then C
         assert_eq!(dod.criteria.len(), 2);
         assert_eq!(dod.criteria[0].id, "C1");
         assert_eq!(dod.criteria[1].id, "C2");
+    }
+
+    #[test]
+    fn test_write_dod_round_trip() {
+        let content = r#"# example-app — Definition of Done
+
+## USP
+CI check for Steam devs.
+
+---
+
+## [C1] CI exits non-zero on high-impact changes
+
+**Evidence:** `tests/integration/ci_exit_codes.rs`
+
+**Scenario:**
+Given a Steam game repo
+When the check runs
+Then it exits non-zero
+
+**Automated:** pending
+**Human:** pending
+"#;
+        let dod = parse_dod(content).unwrap();
+        let written = write_dod(&dod);
+        let reparsed = parse_dod(&written).unwrap();
+        assert_eq!(reparsed.project_name, dod.project_name);
+        assert_eq!(reparsed.criteria.len(), 1);
+        assert_eq!(reparsed.criteria[0].id, "C1");
+        assert_eq!(reparsed.criteria[0].automated, CriterionStatus::Pending);
+    }
+
+    #[test]
+    fn test_write_dod_pass_with_rationale() {
+        let today = NaiveDate::from_ymd_opt(2026, 2, 19).unwrap();
+        let dod = DodFile {
+            project_name: "test".to_string(),
+            usp: "Does something useful.".to_string(),
+            criteria: vec![Criterion {
+                id: "C1".to_string(),
+                description: "Feature works".to_string(),
+                evidence: Some("`src/feature.rs`".to_string()),
+                scenario: "Given X\nWhen Y\nThen Z".to_string(),
+                automated: CriterionStatus::Pass {
+                    date: today,
+                    rationale: Some("Evidence found in src/feature.rs.".to_string()),
+                },
+                human: CriterionStatus::Pending,
+            }],
+        };
+        let written = write_dod(&dod);
+        assert!(written.contains("pass — 2026-02-19"));
+        assert!(written.contains("> Evidence found in src/feature.rs."));
+        assert!(written.contains("**Human:** pending"));
+    }
+
+    #[test]
+    fn test_rollup_counts_complete() {
+        let today = NaiveDate::from_ymd_opt(2026, 2, 19).unwrap();
+        let dod = DodFile {
+            project_name: "test".to_string(),
+            usp: "x".to_string(),
+            criteria: vec![
+                Criterion {
+                    id: "C1".to_string(),
+                    description: "a".to_string(),
+                    evidence: None,
+                    scenario: "".to_string(),
+                    automated: CriterionStatus::Pass { date: today, rationale: None },
+                    human: CriterionStatus::Pass { date: today, rationale: None },
+                },
+                Criterion {
+                    id: "C2".to_string(),
+                    description: "b".to_string(),
+                    evidence: None,
+                    scenario: "".to_string(),
+                    automated: CriterionStatus::Pass { date: today, rationale: None },
+                    human: CriterionStatus::Pending,
+                },
+            ],
+        };
+        let (complete, total) = rollup(&dod);
+        assert_eq!(total, 2);
+        assert_eq!(complete, 1); // only C1 has both pass
     }
 }
