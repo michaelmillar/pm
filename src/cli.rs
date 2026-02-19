@@ -116,6 +116,14 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Interactive human sign-off for DOD criteria
+    Signoff {
+        /// Project ID
+        id: i64,
+        /// Show all criteria including unverified ones
+        #[arg(long)]
+        all: bool,
+    },
     /// Run automated DOD verification via Claude
     Verify {
         /// Project ID
@@ -175,6 +183,7 @@ pub fn run() {
         Commands::Park { id, reason } => cmd_park(&store, id, &reason),
         Commands::Tasks { id } => cmd_tasks(&store, id),
         Commands::Charter { id, force } => cmd_charter(&store, id, force),
+        Commands::Signoff { id, all } => cmd_signoff(&store, id, all),
         Commands::Verify { id, all, criterion } => cmd_verify(&store, id, all, criterion),
         Commands::Dod { id, show, force } => cmd_dod(&store, id, show, force),
         Commands::Mark {
@@ -1307,6 +1316,131 @@ fn cmd_mark(store: &Store, id: i64, task_number: usize, plan: Option<String>) {
     }
 }
 
+fn cmd_signoff(store: &Store, id: i64, all: bool) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => {
+            println!("Project '{}' has no linked path.", project.name);
+            return;
+        }
+    };
+    let project_path = Path::new(&path);
+
+    let mut dod_file = match dod::load_dod(project_path) {
+        Some(d) => d,
+        None => {
+            println!("No DOD.md found. Run: pm dod {}", id);
+            return;
+        }
+    };
+
+    let today = chrono::Local::now().date_naive();
+
+    // Criteria eligible for sign-off: automated pass (unless --all)
+    let eligible: Vec<usize> = dod_file.criteria.iter().enumerate()
+        .filter(|(_, c)| {
+            if c.human.is_done() { return false; } // already signed off
+            if !all && !c.automated.is_done() { return false; } // not yet auto-verified
+            true
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    if eligible.is_empty() {
+        println!("Nothing to sign off.");
+        if !all {
+            println!("Run 'pm verify {}' first, or use --all to sign off unverified criteria.", id);
+        }
+        return;
+    }
+
+    println!("{} — Human Sign-off\n", project.name);
+    println!("You are reviewing these criteria as an external user/payer.\n");
+
+    let mut changed = 0;
+
+    for idx in eligible {
+        let c = &dod_file.criteria[idx];
+        println!("─────────────────────────────────────────────────");
+        println!("[{}] {}", c.id, c.description);
+        println!("  Automated: {}", c.automated.label());
+
+        // Show automated rationale if available
+        let auto_rationale = match &c.automated {
+            crate::dod::CriterionStatus::Pass { rationale, .. }
+            | crate::dod::CriterionStatus::Fail { rationale, .. }
+            | crate::dod::CriterionStatus::Inconclusive { rationale, .. } => rationale.as_deref(),
+            _ => None,
+        };
+
+        println!("\nScenario:");
+        for line in c.scenario.lines() {
+            println!("  {}", line);
+        }
+        println!();
+        println!("Sign off as external user/payer? [y/n/skip/?] ");
+
+        loop {
+            use std::io::Write;
+            print!("> ");
+            std::io::stdout().flush().ok();
+            let mut input = String::new();
+            if std::io::stdin().read_line(&mut input).is_err() {
+                break;
+            }
+            match input.trim() {
+                "y" => {
+                    print!("Note (Enter to skip): ");
+                    std::io::stdout().flush().ok();
+                    let mut note = String::new();
+                    let _ = std::io::stdin().read_line(&mut note);
+                    let rationale = if note.trim().is_empty() { None } else { Some(note.trim().to_string()) };
+                    dod_file.criteria[idx].human = crate::dod::CriterionStatus::Pass { date: today, rationale };
+                    println!("✓ Signed off.\n");
+                    changed += 1;
+                    break;
+                }
+                "n" => {
+                    print!("Why? (required): ");
+                    std::io::stdout().flush().ok();
+                    let mut reason = String::new();
+                    let _ = std::io::stdin().read_line(&mut reason);
+                    let rationale = if reason.trim().is_empty() { Some("Failed sign-off.".to_string()) } else { Some(reason.trim().to_string()) };
+                    dod_file.criteria[idx].human = crate::dod::CriterionStatus::Fail { date: today, rationale };
+                    println!("✗ Marked fail.\n");
+                    changed += 1;
+                    break;
+                }
+                "skip" => {
+                    println!("Skipped.\n");
+                    break;
+                }
+                "?" => {
+                    println!("Automated rationale: {}", auto_rationale.unwrap_or("(none)"));
+                }
+                _ => {
+                    println!("Enter y, n, skip, or ? for rationale.");
+                }
+            }
+        }
+    }
+
+    if changed > 0 {
+        if let Err(e) = dod::save_dod(project_path, &dod_file) {
+            println!("Error saving DOD.md: {}", e);
+        } else {
+            let (complete, total) = dod::rollup(&dod_file);
+            println!("Saved. DOD: {}/{} criteria fully complete.", complete, total);
+        }
+    } else {
+        println!("No changes made.");
+    }
+}
+
 fn cmd_verify(store: &Store, id: i64, all: bool, criterion_filter: Option<String>) {
     let project = match store.get_project(id).unwrap() {
         Some(p) => p,
@@ -1515,6 +1649,16 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_cmd_signoff_no_dod_file() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let id = store.add_project("signoff-test").unwrap();
+        store.link_project(id, tmp.path().to_string_lossy().as_ref()).unwrap();
+        // Should print message, not panic
+        cmd_signoff(&store, id, false);
+    }
 
     #[test]
     fn test_cmd_verify_no_linked_path() {
