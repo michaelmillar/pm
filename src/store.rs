@@ -62,6 +62,7 @@ impl Store {
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN research_previous TEXT", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN researched_at TEXT", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN research_consecutive_flags INTEGER NOT NULL DEFAULT 0", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN inbox_note TEXT", []);
         Ok(())
     }
 
@@ -256,6 +257,25 @@ impl Store {
             params![name, id],
         )?;
         Ok(count)
+    }
+
+    pub fn set_inbox_note(&self, id: i64, note: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE projects SET inbox_note = ?1 WHERE id = ?2",
+            params![note, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_inbox_note(&self, id: i64) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT inbox_note FROM projects WHERE id = ?1")?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => row.get(0),
+            None => Ok(None),
+        }
     }
 
     fn row_to_project(row: &rusqlite::Row) -> Result<Project> {
@@ -623,5 +643,34 @@ mod tests {
         let id = store.add_project("no-research").unwrap();
         let result = store.get_research(id).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_set_and_get_inbox_note() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("pivot-idea").unwrap();
+
+        store.set_inbox_note(id, "A tool that does X uniquely.").unwrap();
+
+        let note = store.get_inbox_note(id).unwrap();
+        assert_eq!(note.as_deref(), Some("A tool that does X uniquely."));
+    }
+
+    #[test]
+    fn test_get_inbox_note_none_when_unset() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("no-note").unwrap();
+        let note = store.get_inbox_note(id).unwrap();
+        assert!(note.is_none());
+    }
+
+    #[test]
+    fn test_set_inbox_note_overwrites() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("rewrite").unwrap();
+        store.set_inbox_note(id, "First note.").unwrap();
+        store.set_inbox_note(id, "Second note.").unwrap();
+        let note = store.get_inbox_note(id).unwrap();
+        assert_eq!(note.as_deref(), Some("Second note."));
     }
 }
