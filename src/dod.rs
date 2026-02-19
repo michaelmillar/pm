@@ -265,6 +265,105 @@ pub fn parse_dod(content: &str) -> Result<DodFile, String> {
     })
 }
 
+use std::path::Path;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DodAction {
+    Created,
+    AlreadyExists,
+    Overwritten,
+}
+
+const DOD_TEMPLATE: &str = r#"## [C1] _TODO: First criterion description_
+
+**Evidence:** `_TODO: path/to/relevant/file_`
+
+**Scenario:**
+Given _TODO: initial state_
+When _TODO: action taken_
+Then _TODO: expected outcome_
+
+**Automated:** pending
+**Human:** pending
+"#;
+
+pub fn generate_dod(path: &Path, name: &str, usp: Option<String>, force: bool) -> Result<DodAction, String> {
+    let dod_path = path.join("docs").join("DOD.md");
+
+    if dod_path.exists() && !force {
+        return Ok(DodAction::AlreadyExists);
+    }
+
+    let docs_dir = path.join("docs");
+    if !docs_dir.exists() {
+        std::fs::create_dir_all(&docs_dir)
+            .map_err(|e| format!("Failed to create docs/: {}", e))?;
+    }
+
+    let usp_text = usp
+        .or_else(|| extract_usp_from_charter(path))
+        .unwrap_or_else(|| "_TODO: One sentence describing what this project does and why it's unique.".to_string());
+
+    let content = format!(
+        "# {} — Definition of Done\n\n## USP\n{}\n\n---\n\n{}\n",
+        name, usp_text, DOD_TEMPLATE
+    );
+
+    std::fs::write(&dod_path, content)
+        .map_err(|e| format!("Failed to write DOD.md: {}", e))?;
+
+    if force && dod_path.exists() {
+        Ok(DodAction::Overwritten)
+    } else {
+        Ok(DodAction::Created)
+    }
+}
+
+pub fn extract_usp_from_charter(path: &Path) -> Option<String> {
+    let charter_path = path.join("docs").join("CHARTER.md");
+    let content = std::fs::read_to_string(charter_path).ok()?;
+
+    let mut in_usp = false;
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in content.lines() {
+        if line.starts_with("## Vision & USP") {
+            in_usp = true;
+            continue;
+        }
+        if in_usp {
+            if line.starts_with("## ") {
+                break;
+            }
+            if line.contains("_TODO:") {
+                continue;
+            }
+            if !line.trim().is_empty() {
+                lines.push(line.to_string());
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join(" ").trim().to_string())
+    }
+}
+
+pub fn load_dod(path: &Path) -> Option<DodFile> {
+    let dod_path = path.join("docs").join("DOD.md");
+    let content = std::fs::read_to_string(dod_path).ok()?;
+    parse_dod(&content).ok()
+}
+
+pub fn save_dod(path: &Path, dod: &DodFile) -> Result<(), String> {
+    let dod_path = path.join("docs").join("DOD.md");
+    let content = write_dod(dod);
+    std::fs::write(dod_path, content)
+        .map_err(|e| format!("Failed to write DOD.md: {}", e))
+}
+
 pub fn write_dod(dod: &DodFile) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {} — Definition of Done\n", dod.project_name));
@@ -578,5 +677,57 @@ Then it exits non-zero
         let (complete, total) = rollup(&dod);
         assert_eq!(total, 2);
         assert_eq!(complete, 1); // only C1 has both pass
+    }
+
+    #[test]
+    fn test_generate_dod_creates_file() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        let result = generate_dod(tmp.path(), "patchwaste", None, false).unwrap();
+        assert_eq!(result, DodAction::Created);
+        assert!(tmp.path().join("docs").join("DOD.md").exists());
+    }
+
+    #[test]
+    fn test_generate_dod_already_exists() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        generate_dod(tmp.path(), "patchwaste", None, false).unwrap();
+        let result = generate_dod(tmp.path(), "patchwaste", None, false).unwrap();
+        assert_eq!(result, DodAction::AlreadyExists);
+    }
+
+    #[test]
+    fn test_generate_dod_uses_provided_usp() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        generate_dod(tmp.path(), "test", Some("My USP here.".to_string()), false).unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("docs").join("DOD.md")).unwrap();
+        assert!(content.contains("My USP here."));
+    }
+
+    #[test]
+    fn test_extract_usp_from_charter() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let charter = r#"# test — Project Charter
+
+## Vision & USP
+
+This tool does something great and is unique.
+
+## Goals
+
+Some goals.
+"#;
+        std::fs::write(docs.join("CHARTER.md"), charter).unwrap();
+        let usp = extract_usp_from_charter(tmp.path());
+        assert!(usp.is_some());
+        assert!(usp.unwrap().contains("something great"));
     }
 }
