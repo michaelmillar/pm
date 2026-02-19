@@ -69,6 +69,202 @@ pub fn parse_status(value: &str) -> CriterionStatus {
     }
 }
 
+pub fn parse_dod(content: &str) -> Result<DodFile, String> {
+    let mut project_name = String::new();
+    let mut usp_lines: Vec<String> = Vec::new();
+    let mut criteria: Vec<Criterion> = Vec::new();
+
+    #[derive(PartialEq)]
+    enum State {
+        Header,
+        Usp,
+        CriterionBody,
+        Scenario,
+        Done,
+    }
+
+    let mut state = State::Header;
+    let mut current: Option<CriterionInProgress> = None;
+
+    struct CriterionInProgress {
+        id: String,
+        description: String,
+        evidence: Option<String>,
+        scenario_lines: Vec<String>,
+        automated_raw: String,
+        automated_rationale: Vec<String>,
+        human_raw: String,
+        human_rationale: Vec<String>,
+        in_automated_rationale: bool,
+        in_human_rationale: bool,
+    }
+
+    impl CriterionInProgress {
+        fn new(id: &str, description: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                description: description.to_string(),
+                evidence: None,
+                scenario_lines: Vec::new(),
+                automated_raw: "pending".to_string(),
+                automated_rationale: Vec::new(),
+                human_raw: "pending".to_string(),
+                human_rationale: Vec::new(),
+                in_automated_rationale: false,
+                in_human_rationale: false,
+            }
+        }
+        fn to_criterion(self) -> Criterion {
+            let rationale_str = |lines: Vec<String>| -> Option<String> {
+                if lines.is_empty() { None } else { Some(lines.join("\n")) }
+            };
+            let mut auto_status = parse_status(&self.automated_raw);
+            let mut human_status = parse_status(&self.human_raw);
+            // attach rationale
+            if let Some(r) = rationale_str(self.automated_rationale) {
+                match &mut auto_status {
+                    CriterionStatus::Pass { rationale, .. }
+                    | CriterionStatus::Fail { rationale, .. }
+                    | CriterionStatus::Inconclusive { rationale, .. } => *rationale = Some(r),
+                    _ => {}
+                }
+            }
+            if let Some(r) = rationale_str(self.human_rationale) {
+                match &mut human_status {
+                    CriterionStatus::Pass { rationale, .. }
+                    | CriterionStatus::Fail { rationale, .. }
+                    | CriterionStatus::Inconclusive { rationale, .. } => *rationale = Some(r),
+                    _ => {}
+                }
+            }
+            Criterion {
+                id: self.id,
+                description: self.description,
+                evidence: self.evidence,
+                scenario: self.scenario_lines.join("\n").trim().to_string(),
+                automated: auto_status,
+                human: human_status,
+            }
+        }
+    }
+
+    fn flush(current: &mut Option<CriterionInProgress>, criteria: &mut Vec<Criterion>) {
+        if let Some(c) = current.take() {
+            criteria.push(c.to_criterion());
+        }
+    }
+
+    for line in content.lines() {
+        // Project name from H1: "# patchwaste — Definition of Done"
+        if project_name.is_empty() && line.starts_with("# ") {
+            let title = &line[2..];
+            project_name = if let Some(pos) = title.find(" — ") {
+                title[..pos].trim().to_string()
+            } else {
+                title.trim().to_string()
+            };
+            continue;
+        }
+
+        // Section headings
+        if line.starts_with("## USP") {
+            state = State::Usp;
+            continue;
+        }
+
+        // Criterion heading: "## [C1] Description"
+        if line.starts_with("## [") {
+            flush(&mut current, &mut criteria);
+            if let Some(bracket_end) = line.find(']') {
+                let id = line[4..bracket_end].to_string(); // "C1"
+                let description = line[bracket_end + 1..].trim().to_string();
+                current = Some(CriterionInProgress::new(&id, &description));
+                state = State::CriterionBody;
+            }
+            continue;
+        }
+
+        if line == "---" {
+            if state == State::Usp {
+                state = State::Done;
+            }
+            continue;
+        }
+
+        match state {
+            State::Usp => {
+                if !line.trim().is_empty() {
+                    usp_lines.push(line.to_string());
+                }
+            }
+            State::CriterionBody | State::Scenario => {
+                if let Some(ref mut c) = current {
+                    // Evidence
+                    if let Some(ev) = line.strip_prefix("**Evidence:**") {
+                        c.evidence = Some(ev.trim().to_string());
+                        c.in_automated_rationale = false;
+                        c.in_human_rationale = false;
+                        continue;
+                    }
+                    // Scenario start
+                    if line.starts_with("**Scenario:**") {
+                        state = State::Scenario;
+                        c.in_automated_rationale = false;
+                        c.in_human_rationale = false;
+                        continue;
+                    }
+                    // Automated status
+                    if let Some(val) = line.strip_prefix("**Automated:**") {
+                        c.automated_raw = val.trim().to_string();
+                        c.in_automated_rationale = true;
+                        c.in_human_rationale = false;
+                        state = State::CriterionBody;
+                        continue;
+                    }
+                    // Human status
+                    if let Some(val) = line.strip_prefix("**Human:**") {
+                        c.human_raw = val.trim().to_string();
+                        c.in_human_rationale = true;
+                        c.in_automated_rationale = false;
+                        state = State::CriterionBody;
+                        continue;
+                    }
+                    // Rationale lines ("> text")
+                    if let Some(r) = line.strip_prefix("> ") {
+                        if c.in_human_rationale {
+                            c.human_rationale.push(r.to_string());
+                        } else if c.in_automated_rationale {
+                            c.automated_rationale.push(r.to_string());
+                        }
+                        continue;
+                    }
+                    // Scenario body lines
+                    if state == State::Scenario {
+                        if !line.trim().is_empty() {
+                            c.scenario_lines.push(line.to_string());
+                        }
+                        continue;
+                    }
+                    // Non-rationale content resets rationale mode
+                    if !line.trim().is_empty() && !line.starts_with('>') {
+                        c.in_automated_rationale = false;
+                        c.in_human_rationale = false;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    flush(&mut current, &mut criteria);
+
+    Ok(DodFile {
+        project_name,
+        usp: usp_lines.join("\n").trim().to_string(),
+        criteria,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +320,111 @@ mod tests {
     fn test_parse_status_unknown_falls_back_to_pending() {
         let s = parse_status("garbage text");
         assert_eq!(s, CriterionStatus::Pending);
+    }
+
+    #[test]
+    fn test_parse_dod_full() {
+        let content = r#"# patchwaste — Definition of Done
+
+## USP
+CI check that integrates into a Steam game dev's workflow.
+
+---
+
+## [C1] CI binary exits non-zero on high-impact changes
+
+**Evidence:** `tests/integration/ci_exit_codes.rs`
+
+**Scenario:**
+Given a Steam game repo
+When the patchwaste CI check runs
+Then it exits non-zero
+
+**Automated:** pending
+**Human:** pending
+"#;
+        let dod = parse_dod(content).unwrap();
+        assert_eq!(dod.project_name, "patchwaste");
+        assert_eq!(dod.criteria.len(), 1);
+        let c = &dod.criteria[0];
+        assert_eq!(c.id, "C1");
+        assert_eq!(c.description, "CI binary exits non-zero on high-impact changes");
+        assert!(c.evidence.is_some());
+        assert!(c.scenario.contains("Given a Steam game repo"));
+        assert_eq!(c.automated, CriterionStatus::Pending);
+        assert_eq!(c.human, CriterionStatus::Pending);
+    }
+
+    #[test]
+    fn test_parse_dod_with_pass_status_and_rationale() {
+        let content = r#"# wonk — Definition of Done
+
+## USP
+UK political simulator.
+
+---
+
+## [C1] Player can win an election
+
+**Evidence:** `src/game/election.rs`
+
+**Scenario:**
+Given the player has high approval
+When they call an election
+Then they win
+
+**Automated:** pass — 2026-02-19
+> Confirmed in election_win_test.
+**Human:** fail — 2026-02-19
+> Felt unfair as a player.
+"#;
+        let dod = parse_dod(content).unwrap();
+        let c = &dod.criteria[0];
+        assert_eq!(c.automated.label(), "pass");
+        assert_eq!(c.human.label(), "fail");
+        if let CriterionStatus::Pass { rationale, .. } = &c.automated {
+            assert!(rationale.as_deref().unwrap_or("").contains("Confirmed"));
+        }
+    }
+
+    #[test]
+    fn test_parse_dod_multiple_criteria() {
+        let content = r#"# foo — Definition of Done
+
+## USP
+Does something.
+
+---
+
+## [C1] First criterion
+
+**Evidence:** `src/a.rs`
+
+**Scenario:**
+Given X
+When Y
+Then Z
+
+**Automated:** pending
+**Human:** pending
+
+---
+
+## [C2] Second criterion
+
+**Evidence:** `src/b.rs`
+
+**Scenario:**
+Given A
+When B
+Then C
+
+**Automated:** pending
+**Human:** pending
+"#;
+        let dod = parse_dod(content).unwrap();
+        assert_eq!(dod.criteria.len(), 2);
+        assert_eq!(dod.criteria[0].id, "C1");
+        assert_eq!(dod.criteria[1].id, "C2");
     }
 }
