@@ -424,6 +424,69 @@ pub fn parse_pivot_ideas(output: &str) -> Vec<PivotIdea> {
     ideas
 }
 
+pub fn run_pivot_claude(
+    project_name: &str,
+    usp: &str,
+    research_summary: Option<&str>,
+    profile: &str,
+    count: usize,
+) -> Result<String, String> {
+    let prompt = build_pivot_prompt(project_name, usp, research_summary, profile, count);
+    run_claude_with_tools(&prompt, &["WebSearch", "WebFetch"])
+}
+
+pub fn build_pivot_prompt(
+    project_name: &str,
+    usp: &str,
+    research_summary: Option<&str>,
+    profile: &str,
+    count: usize,
+) -> String {
+    let why_abandoned = research_summary.unwrap_or("no research — user confirmed proceeding without it");
+
+    let competitors = research_summary
+        .and_then(|s| {
+            let start = s.find("## Competitors")?;
+            let end = s[start..].find("\n## ").map(|i| start + i).unwrap_or(s.len());
+            Some(s[start..end].trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    format!(
+        r#"You are helping a solo developer find their next project after abandoning one due to competition.
+
+COMPETED-OUT PROJECT: {name}
+USP: {usp}
+WHY ABANDONED: {why}
+
+WHAT COMPETITORS COVER:
+{competitors}
+
+DEVELOPER PROFILE:
+{profile}
+
+Generate exactly {count} novel product ideas. Each must:
+1. Exploit a gap the above competitors leave uncovered
+2. Be buildable by this developer given their profile
+3. Be distinct from their existing active projects listed in the profile
+4. Be specific — not "a better X" but a named concept with a clear USP
+
+For each idea respond in exactly this format:
+---
+NAME: <short working title>
+USP: <one sentence — what it does and why it's unique>
+GAP: <one sentence — what the competitors missed that this exploits>
+FIT: <one sentence — why this suits the developer's profile>
+---"#,
+        name = project_name,
+        usp = usp,
+        why = why_abandoned,
+        competitors = competitors,
+        profile = profile,
+        count = count,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,5 +652,21 @@ mod tests {
     fn test_parse_pivot_ideas_empty() {
         let ideas = parse_pivot_ideas("No structured output here.");
         assert!(ideas.is_empty());
+    }
+
+    #[test]
+    fn test_build_pivot_prompt_includes_key_fields() {
+        let prompt = build_pivot_prompt(
+            "Career Politician",
+            "UK political sim",
+            Some("Competitor A released in Jan."),
+            "Languages: Rust",
+            3,
+        );
+        assert!(prompt.contains("Career Politician"));
+        assert!(prompt.contains("UK political sim"));
+        assert!(prompt.contains("Competitor A"));
+        assert!(prompt.contains("Languages: Rust"));
+        assert!(prompt.contains("3"));
     }
 }
