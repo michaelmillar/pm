@@ -1368,7 +1368,8 @@ fn cmd_charter(store: &Store, id: i64, force: bool) {
         }
     };
 
-    match charter::generate_charter(Path::new(&path), &project.name, force) {
+    let inbox_note = store.get_inbox_note(id).ok().flatten();
+    match charter::generate_charter(Path::new(&path), &project.name, force, inbox_note.as_deref()) {
         Ok(charter::CharterAction::Created) => {
             println!("Created docs/CHARTER.md for '{}'.", project.name);
             println!("Fill in the 9 sections, then run 'pm charter {}' to check progress.", id);
