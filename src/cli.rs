@@ -1,6 +1,8 @@
 use crate::charter;
 use crate::discovery;
+use crate::dod;
 use crate::roadmap;
+use crate::research;
 use crate::domain::{ProjectState, TaskSource};
 use crate::naming;
 use crate::scanner;
@@ -114,6 +116,17 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Initialise or show a project's Definition of Done
+    Dod {
+        /// Project ID
+        id: i64,
+        /// Show DOD status instead of initialising
+        #[arg(long)]
+        show: bool,
+        /// Overwrite existing DOD.md
+        #[arg(long)]
+        force: bool,
+    },
     /// Mark a task as done in the local progress file
     Mark {
         /// Project ID
@@ -151,6 +164,7 @@ pub fn run() {
         Commands::Park { id, reason } => cmd_park(&store, id, &reason),
         Commands::Tasks { id } => cmd_tasks(&store, id),
         Commands::Charter { id, force } => cmd_charter(&store, id, force),
+        Commands::Dod { id, show, force } => cmd_dod(&store, id, show, force),
         Commands::Mark {
             id,
             task_number,
@@ -1281,6 +1295,62 @@ fn cmd_mark(store: &Store, id: i64, task_number: usize, plan: Option<String>) {
     }
 }
 
+fn cmd_dod(store: &Store, id: i64, show: bool, force: bool) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => {
+            println!("Project '{}' has no linked path. Use: pm link {} <path>", project.name, id);
+            return;
+        }
+    };
+    let project_path = Path::new(&path);
+
+    if show {
+        match dod::load_dod(project_path) {
+            None => {
+                println!("No DOD.md found for '{}'. Run: pm dod {}", project.name, id);
+            }
+            Some(d) => {
+                let (complete, total) = dod::rollup(&d);
+                println!("{} — Definition of Done ({}/{} complete)\n", project.name, complete, total);
+                println!("USP: {}\n", d.usp);
+                for c in &d.criteria {
+                    let auto_sym = if c.automated.is_done() { "✓" } else { "✗" };
+                    let human_sym = if c.human.is_done() { "✓" } else { "✗" };
+                    let done = c.automated.is_done() && c.human.is_done();
+                    let marker = if done { "✓" } else { "–" };
+                    println!("[{}] [{}] {} — auto:{} human:{}  {}",
+                        c.id, marker, c.description, auto_sym, human_sym,
+                        if done { "" } else { &format!("({})", c.automated.label()) }
+                    );
+                }
+                println!("\nVerify: pm verify {}    Sign off: pm signoff {}", id, id);
+            }
+        }
+        return;
+    }
+
+    // Init path
+    let usp = dod::extract_usp_from_charter(project_path);
+    match dod::generate_dod(project_path, &project.name, usp, force) {
+        Ok(dod::DodAction::Created) => {
+            println!("Created docs/DOD.md for '{}'.", project.name);
+            println!("Fill in the criteria, then run: pm verify {}", id);
+        }
+        Ok(dod::DodAction::AlreadyExists) => {
+            println!("docs/DOD.md already exists. Use --show to view, --force to overwrite.");
+        }
+        Ok(dod::DodAction::Overwritten) => {
+            println!("Overwritten docs/DOD.md for '{}'.", project.name);
+        }
+        Err(e) => println!("Error: {}", e),
+    }
+}
+
 fn normalize_plan_file(input: &str) -> String {
     std::path::Path::new(input)
         .file_name()
@@ -1295,6 +1365,29 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_cmd_dod_init_creates_file() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let id = store.add_project("dod-test").unwrap();
+        store.link_project(id, tmp.path().to_string_lossy().as_ref()).unwrap();
+
+        cmd_dod(&store, id, false, false);
+
+        assert!(tmp.path().join("docs").join("DOD.md").exists());
+    }
+
+    #[test]
+    fn test_cmd_dod_show_missing_prints_message() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let id = store.add_project("dod-show").unwrap();
+        store.link_project(id, tmp.path().to_string_lossy().as_ref()).unwrap();
+
+        // Should not panic
+        cmd_dod(&store, id, true, false);
+    }
 
     #[test]
     fn test_normalize_plan_file_accepts_path() {
