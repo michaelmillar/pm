@@ -47,10 +47,22 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
-    /// Show scoring rubric and open roadmap.yaml for research
+    /// Run or view competitive research for a project
     Research {
-        /// Project ID
-        id: i64,
+        /// Project ID (omit with --scheduled to scan all overdue projects)
+        id: Option<i64>,
+        /// Show last diff without re-running
+        #[arg(long)]
+        diff: bool,
+        /// Show full current summary without re-running
+        #[arg(long)]
+        full: bool,
+        /// Force re-run even if not due
+        #[arg(long)]
+        refresh: bool,
+        /// Run research for all overdue active projects
+        #[arg(long)]
+        scheduled: bool,
     },
     /// Show your top 3 priority projects
     Throne,
@@ -162,13 +174,18 @@ pub fn run() {
     let cli = Cli::parse();
     let store = open_store();
 
+    // Startup: nudge if any project is overdue for research
+    check_research_due_notice(&store);
+
     match cli.command {
         Commands::Next => cmd_next(&store),
         Commands::Status => cmd_status(&store),
         Commands::Done { id } => cmd_done(&store, id),
         Commands::Add { name } => cmd_add(&store, &name),
         Commands::Roadmap { id, add_component, force } => cmd_roadmap(&store, id, add_component, force),
-        Commands::Research { id } => cmd_research(&store, id),
+        Commands::Research { id, diff, full, refresh, scheduled } => {
+            cmd_research(&store, id, diff, full, refresh, scheduled)
+        }
         Commands::Throne => cmd_throne(&store),
         Commands::Why => cmd_why(&store),
         Commands::Inbox => cmd_inbox(&store),
@@ -534,48 +551,151 @@ fn build_roadmap_yaml(
     yaml
 }
 
-fn cmd_research(store: &Store, id: i64) {
+fn cmd_research(store: &Store, id: Option<i64>, show_diff: bool, show_full: bool, refresh: bool, scheduled: bool) {
+    let freq = research::load_frequency();
+
+    if scheduled {
+        let projects = store.list_active_projects().unwrap();
+        let due: Vec<_> = projects.iter()
+            .filter(|p| p.path.is_some())
+            .filter(|p| {
+                let rec = store.get_research(p.id).unwrap();
+                let researched_at = rec.as_ref().and_then(|r| r.researched_at.as_deref());
+                research::is_research_due(researched_at, &freq)
+            })
+            .collect();
+
+        if due.is_empty() {
+            println!("No projects due for research.");
+            return;
+        }
+        println!("Running scheduled research for {} project(s)...\n", due.len());
+        for p in due {
+            run_research_for_project(store, p.id, false);
+        }
+        return;
+    }
+
+    let id = match id {
+        Some(i) => i,
+        None => {
+            println!("Specify a project ID: pm research <id>");
+            println!("Or run: pm research --scheduled");
+            return;
+        }
+    };
+
+    run_research_for_project(store, id, refresh || show_diff || show_full);
+
+    if show_diff {
+        print_research_diff(store, id);
+        return;
+    }
+    if show_full {
+        print_research_full(store, id);
+        return;
+    }
+}
+
+fn run_research_for_project(store: &Store, id: i64, force: bool) {
     let project = match store.get_project(id).unwrap() {
         Some(p) => p,
         None => { println!("Project {} not found", id); return; }
     };
+
     let path = match project.path {
         Some(ref p) => p.clone(),
-        None => { println!("Project '{}' is not linked to a codebase.", project.name); return; }
+        None => {
+            println!("Project '{}' has no linked path.", project.name);
+            return;
+        }
     };
-    let yaml_path = Path::new(&path).join("docs").join("roadmap.yaml");
-    if !yaml_path.exists() {
-        println!("No roadmap.yaml found for '{}'.", project.name);
-        println!("Run 'pm roadmap {}' to create one first.", id);
+
+    let freq = research::load_frequency();
+    let rec = store.get_research(id).unwrap();
+    let researched_at = rec.as_ref().and_then(|r| r.researched_at.as_deref());
+
+    if !force && !research::is_research_due(researched_at, &freq) {
+        println!("'{}' was researched recently. Use --refresh to force.", project.name);
+        print_research_diff(store, id);
         return;
     }
-    println!("Research rubric for: {}\n", project.name);
-    println!("Impact (1–10):");
-    println!("  9-10  Large audience (>1M), strong unmet need, no close substitute");
-    println!("  7-8   Clear niche (100K–1M), meaningful differentiation");
-    println!("  5-6   Moderate audience, competitors exist but have real gaps");
-    println!("  3-4   Small or unclear audience, weak differentiation");
-    println!("  1-2   Niche hobby project, unclear who it's for");
-    println!();
-    println!("Monetization (1–10):");
-    println!("  9-10  Comparable paid products at >£20/mo or >£30 one-time");
-    println!("  7-8   Comparable paid products at £5–20/mo or £10–30 one-time");
-    println!("  5-6   Free competitors dominate but paid tier is plausible");
-    println!("  3-4   Hard to monetise; audience expects free");
-    println!("  1-2   No realistic monetisation path");
-    println!();
-    println!("Cloneability (1–10, higher = harder to clone = more defensible):");
-    println!("  9-10  Unique dataset, regulatory moat, or network effects");
-    println!("  7-8   Deep domain expertise or proprietary integration required");
-    println!("  5-6   Replicable with significant engineering effort (6–12 months)");
-    println!("  3-4   Similar tools exist; can be cloned in weeks by a funded team");
-    println!("  1-2   Trivially replicable; no meaningful barrier");
-    println!();
-    println!("Edit: {}", yaml_path.display());
-    if let Ok(editor) = std::env::var("EDITOR") {
-        let _ = std::process::Command::new(&editor).arg(&yaml_path).status();
-    } else {
-        println!("(Set $EDITOR to open automatically)");
+
+    // Extract USP for prompt
+    let usp = dod::extract_usp_from_charter(std::path::Path::new(&path))
+        .unwrap_or_else(|| project.name.clone());
+
+    println!("Researching '{}' via Claude (this may take a moment)...", project.name);
+
+    match research::run_research_claude(&project.name, &usp) {
+        Err(e) => println!("Error: {}", e),
+        Ok(current_summary) => {
+            // Compute diff if we have previous data
+            let diff_output = rec.as_ref()
+                .filter(|r| !r.summary.is_empty())
+                .and_then(|prev| {
+                    let prev_date = prev.researched_at.as_deref().unwrap_or("(unknown date)");
+                    research::run_diff_claude(&project.name, &usp, &prev.summary, &current_summary, prev_date).ok()
+                });
+
+            // Save to DB (rotates previous automatically)
+            store.save_research(id, &current_summary).unwrap();
+
+            println!("\n'{}' research complete.", project.name);
+
+            if let Some(diff) = diff_output {
+                println!("\n{}", diff);
+            } else {
+                println!("\n{}", current_summary);
+            }
+
+            // Check cut-losses warning
+            let updated_rec = store.get_research(id).unwrap();
+            if let Some(r) = updated_rec {
+                if r.consecutive_flags >= 2 {
+                    println!("\n⚠  Research has flagged '{}' for re-evaluation {} times in a row.", project.name, r.consecutive_flags);
+                    println!("   Run 'pm research {} --full' to review.", id);
+                }
+            }
+        }
+    }
+}
+
+fn print_research_diff(store: &Store, id: i64) {
+    match store.get_research(id).unwrap() {
+        None => println!("No research data. Run: pm research {}", id),
+        Some(r) => {
+            println!("{}", r.summary);
+        }
+    }
+}
+
+fn print_research_full(store: &Store, id: i64) {
+    match store.get_research(id).unwrap() {
+        None => println!("No research data. Run: pm research {}", id),
+        Some(r) => println!("{}", r.summary),
+    }
+}
+
+fn check_research_due_notice(store: &Store) {
+    let freq = research::load_frequency();
+    if matches!(freq, research::ResearchFrequency::Never) {
+        return;
+    }
+    let projects = store.list_active_projects().unwrap_or_default();
+    let due: Vec<_> = projects.iter()
+        .filter(|p| p.path.is_some())
+        .filter(|p| {
+            let rec = store.get_research(p.id).unwrap_or(None);
+            let researched_at = rec.as_ref().and_then(|r| r.researched_at.as_deref());
+            research::is_research_due(researched_at, &freq)
+        })
+        .map(|p| p.name.as_str().to_string())
+        .collect();
+
+    if !due.is_empty() {
+        println!("ℹ  Research due for: {}", due.join(", "));
+        println!("   Run: pm research --scheduled\n");
     }
 }
 
@@ -1649,6 +1769,25 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_cmd_research_no_id_prints_help() {
+        let store = Store::open_in_memory().unwrap();
+        // Should not panic
+        cmd_research(&store, None, false, false, false, false);
+    }
+
+    #[test]
+    fn test_cmd_research_project_not_found() {
+        let store = Store::open_in_memory().unwrap();
+        cmd_research(&store, Some(9999), false, false, false, false);
+    }
+
+    #[test]
+    fn test_cmd_research_scheduled_no_projects() {
+        let store = Store::open_in_memory().unwrap();
+        cmd_research(&store, None, false, false, false, true);
+    }
 
     #[test]
     fn test_cmd_signoff_no_dod_file() {
