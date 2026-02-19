@@ -168,6 +168,17 @@ enum Commands {
         #[arg(long)]
         plan: Option<String>,
     },
+    /// Suggest novel pivot ideas when a project is competed out
+    Pivot {
+        /// Project ID
+        id: i64,
+        /// Number of ideas to generate (default 3)
+        #[arg(long, default_value = "3")]
+        count: usize,
+        /// Re-run even if pivot was run recently
+        #[arg(long)]
+        refresh: bool,
+    },
 }
 
 pub fn run() {
@@ -208,6 +219,7 @@ pub fn run() {
             task_number,
             plan,
         } => cmd_mark(&store, id, task_number, plan),
+        Commands::Pivot { id, count, refresh } => cmd_pivot(&store, id, count, refresh),
     }
 }
 
@@ -645,7 +657,7 @@ fn run_research_for_project(store: &Store, id: i64, force: bool) {
     let usp = dod::extract_usp_from_charter(std::path::Path::new(&path))
         .unwrap_or_else(|| project.name.clone());
 
-    println!("Researching '{}' via Claude (this may take a moment)...", project.name);
+    println!("Researching '{}' via Claude (Codex fallback enabled)...", project.name);
 
     match research::run_research_claude(&project.name, &usp) {
         Err(e) => println!("Error: {}", e),
@@ -1673,7 +1685,7 @@ fn cmd_verify(store: &Store, id: i64, all: bool, criterion_filter: Option<String
         match result {
             Err(e) => {
                 println!("  Error: {}", e);
-                println!("  Skipping — check that the claude CLI is installed.\n");
+                println!("  Skipping — check Claude/Codex CLI availability.\n");
             }
             Ok(output) => {
                 let (verdict, rationale) = research::parse_verdict(&output);
@@ -1799,6 +1811,111 @@ fn normalize_plan_file(input: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or(input)
         .to_string()
+}
+
+fn cmd_pivot(store: &Store, id: i64, count: usize, _refresh: bool) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+
+    // Get USP from charter or DOD
+    let usp = project.path.as_ref()
+        .and_then(|p| dod::extract_usp_from_charter(std::path::Path::new(p)))
+        .or_else(|| {
+            project.path.as_ref()
+                .and_then(|p| dod::load_dod(std::path::Path::new(p)))
+                .map(|d| d.usp)
+        })
+        .unwrap_or_else(|| project.name.clone());
+
+    // Check for research data
+    let rec = store.get_research(id).unwrap();
+    let research_summary: Option<String> = if let Some(ref r) = rec {
+        Some(r.summary.clone())
+    } else {
+        println!("No research found for '{}'.", project.name);
+        println!("Run 'pm research {}' for better pivot suggestions.", id);
+        print!("Continue without research data? [y/n] > ");
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).ok();
+        if input.trim() != "y" {
+            return;
+        }
+        None
+    };
+
+    // Build profile from active projects (excluding the pivot target)
+    let active = store.list_active_projects().unwrap();
+    let fallback: Vec<(String, Option<String>)> = active.iter()
+        .filter(|p| p.id != id)
+        .map(|p| {
+            let usp = p.path.as_ref()
+                .and_then(|path| dod::extract_usp_from_charter(std::path::Path::new(path)));
+            (p.name.clone(), usp)
+        })
+        .collect();
+    let profile = research::load_profile(Some(&fallback));
+
+    println!("Generating {} pivot ideas for '{}' via Claude...\n", count, project.name);
+
+    let output = match research::run_pivot_claude(&project.name, &usp, research_summary.as_deref(), &profile, count) {
+        Err(e) => {
+            println!("Error: {}", e);
+            println!("Check that the claude CLI is installed: claude --version");
+            return;
+        }
+        Ok(o) => o,
+    };
+
+    let ideas = research::parse_pivot_ideas(&output);
+
+    if ideas.is_empty() {
+        println!("No structured ideas returned. Raw output:\n{}", output);
+        return;
+    }
+
+    println!("Pivot ideas for '{}' ({} generated):\n", project.name, ideas.len());
+
+    let mut added = 0;
+    for (i, idea) in ideas.iter().enumerate() {
+        println!("────────────────────────────────────────────────────");
+        println!("[{}/{}] {}", i + 1, ideas.len(), idea.name);
+        println!("      {}", idea.usp);
+        if !idea.gap.is_empty() {
+            println!("\n      Gap: {}", idea.gap);
+        }
+        if !idea.fit.is_empty() {
+            println!("      Fit: {}", idea.fit);
+        }
+        println!();
+
+        use std::io::Write;
+        print!("Add to inbox? [y/n/skip] > ");
+        std::io::stdout().flush().ok();
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).is_err() {
+            break;
+        }
+        match input.trim() {
+            "y" => {
+                let new_id = store.add_project(&idea.name).unwrap();
+                store.set_inbox_note(new_id, &idea.usp).unwrap();
+                println!("Added '{}' to inbox (id: {}).\n", idea.name, new_id);
+                added += 1;
+            }
+            "n" => { println!("Discarded.\n"); }
+            _ => { println!("Skipped.\n"); }
+        }
+    }
+
+    if added > 0 {
+        println!("Done. Run 'pm inbox' to review what you added.");
+    } else {
+        println!("Done. Nothing added to inbox.");
+    }
 }
 
 #[cfg(test)]
@@ -2065,5 +2182,12 @@ mod tests {
         cmd_restore(&store, id);
         cmd_rename(&store, id, "new-name");
         cmd_park(&store, id, "pause");
+    }
+
+    #[test]
+    fn test_cmd_pivot_project_not_found() {
+        let store = Store::open_in_memory().unwrap();
+        // Should not panic
+        cmd_pivot(&store, 9999, 3, false);
     }
 }
