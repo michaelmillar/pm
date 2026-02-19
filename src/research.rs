@@ -1,6 +1,8 @@
-// Research scheduling and Claude CLI integration.
+// Research scheduling and CLI integration with provider fallback.
 
 use chrono::NaiveDate;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResearchFrequency {
@@ -118,7 +120,7 @@ Recommendation: [one paragraph - should the project continue, pivot, or consider
         usp = usp,
     );
 
-    run_claude_with_tools(&prompt, &["WebSearch", "WebFetch"])
+    run_with_fallback(&prompt, &["WebSearch", "WebFetch"])
 }
 
 /// Call the claude CLI to generate a diff between two research summaries.
@@ -155,7 +157,7 @@ End with one of:
         current = current,
     );
 
-    run_claude_with_tools(&prompt, &["WebSearch", "WebFetch"])
+    run_with_fallback(&prompt, &["WebSearch", "WebFetch"])
 }
 
 /// Call the claude CLI to verify a DOD criterion against a codebase.
@@ -206,12 +208,52 @@ RATIONALE: [one paragraph citing specific evidence from the files above]"#,
         scenario = scenario,
     );
 
-    run_claude_with_tools(&prompt, &["Read", "Glob", "Grep"])
+    run_with_fallback(&prompt, &["Read", "Glob", "Grep"])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Provider {
+    Claude,
+    Codex,
+}
+
+fn run_with_fallback(prompt: &str, tools: &[&str]) -> Result<String, String> {
+    run_with_fallback_using(prompt, tools, |provider| match provider {
+        Provider::Claude => run_claude_with_tools(prompt, tools),
+        Provider::Codex => run_codex(prompt),
+    })
+}
+
+fn run_with_fallback_using<F>(_prompt: &str, _tools: &[&str], mut runner: F) -> Result<String, String>
+where
+    F: FnMut(Provider) -> Result<String, String>,
+{
+    match runner(Provider::Claude) {
+        Ok(output) => Ok(output),
+        Err(claude_err) => match runner(Provider::Codex) {
+            Ok(output) => {
+                eprintln!(
+                    "Warning: Claude failed ({}). Fell back to Codex.",
+                    compact_error(&claude_err)
+                );
+                Ok(output)
+            }
+            Err(codex_err) => Err(format!(
+                "claude failed: {}; codex fallback failed: {}",
+                compact_error(&claude_err),
+                compact_error(&codex_err)
+            )),
+        },
+    }
+}
+
+fn compact_error(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn run_claude_with_tools(prompt: &str, tools: &[&str]) -> Result<String, String> {
     let allowed_tools = tools.join(",");
-    let output = std::process::Command::new("claude")
+    let output = Command::new("claude")
         .args([
             "-p", prompt,
             "--model", "sonnet",
@@ -226,6 +268,62 @@ fn run_claude_with_tools(prompt: &str, tools: &[&str]) -> Result<String, String>
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn run_codex(prompt: &str) -> Result<String, String> {
+    let timeout = codex_timeout();
+    let mut command = Command::new("codex");
+    command.args([
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        prompt,
+    ]);
+    let output = run_command_with_timeout(&mut command, timeout)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("codex CLI failed: {}", stderr));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn codex_timeout() -> Duration {
+    let secs = std::env::var("PM_CODEX_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(45);
+    Duration::from_secs(secs)
+}
+
+fn run_command_with_timeout(command: &mut Command, timeout: Duration) -> Result<std::process::Output, String> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to run command: {}", e))?;
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|e| format!("Failed collecting command output: {}", e));
+            }
+            Ok(None) => {
+                if started.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("codex CLI timed out after {}s", timeout.as_secs()));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(format!("Failed waiting on command: {}", e)),
+        }
+    }
 }
 
 /// Parse the VERDICT/RATIONALE response from claude verify output.
@@ -253,6 +351,40 @@ pub fn parse_verdict(output: &str) -> (String, Option<String>) {
     };
 
     (verdict, rationale)
+}
+
+
+/// Load the developer profile from ~/.config/pm/profile.md.
+/// Falls back to a formatted list of active project names + USPs.
+pub fn load_profile(fallback_projects: Option<&[(String, Option<String>)]>) -> String {
+    let profile_path = profile_path();
+    if let Ok(content) = std::fs::read_to_string(&profile_path) {
+        if !content.trim().is_empty() {
+            return content;
+        }
+    }
+    match fallback_projects {
+        None | Some([]) => "No profile available.".to_string(),
+        Some(projects) => {
+            let lines: Vec<String> = projects.iter().map(|(name, usp)| {
+                match usp {
+                    Some(u) => format!("- {}: {}", name, u),
+                    None => format!("- {}", name),
+                }
+            }).collect();
+            format!("Active projects (as skills proxy):\n{}", lines.join("\n"))
+        }
+    }
+}
+
+fn profile_path() -> std::path::PathBuf {
+    if let Ok(val) = std::env::var("PM_PROFILE_PATH") {
+        return std::path::PathBuf::from(val);
+    }
+    dirs::config_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("pm")
+        .join("profile.md")
 }
 
 #[cfg(test)]
@@ -317,5 +449,82 @@ mod tests {
     fn test_parse_verdict_defaults_to_inconclusive() {
         let (v, _) = parse_verdict("No structured response here.");
         assert_eq!(v, "inconclusive");
+    }
+
+    #[test]
+    fn test_fallback_uses_codex_when_claude_fails() {
+        let mut seen = Vec::new();
+        let result = run_with_fallback_using("prompt", &["Read"], |provider| {
+            seen.push(provider);
+            match provider {
+                Provider::Claude => Err("claude CLI failed: out of credits".to_string()),
+                Provider::Codex => Ok("ok from codex".to_string()),
+            }
+        })
+        .expect("codex fallback should succeed");
+
+        assert_eq!(result, "ok from codex");
+        assert_eq!(seen, vec![Provider::Claude, Provider::Codex]);
+    }
+
+    #[test]
+    fn test_fallback_keeps_claude_output_when_claude_succeeds() {
+        let mut seen = Vec::new();
+        let result = run_with_fallback_using("prompt", &["Read"], |provider| {
+            seen.push(provider);
+            match provider {
+                Provider::Claude => Ok("ok from claude".to_string()),
+                Provider::Codex => Ok("ok from codex".to_string()),
+            }
+        })
+        .expect("claude should succeed");
+
+        assert_eq!(result, "ok from claude");
+        assert_eq!(seen, vec![Provider::Claude]);
+    }
+
+    #[test]
+    fn test_fallback_errors_when_both_providers_fail() {
+        let result = run_with_fallback_using("prompt", &["Read"], |provider| match provider {
+            Provider::Claude => Err("claude boom".to_string()),
+            Provider::Codex => Err("codex boom".to_string()),
+        })
+        .expect_err("both providers fail");
+
+        assert!(result.contains("claude failed"));
+        assert!(result.contains("codex fallback failed"));
+    }
+
+    #[test]
+    fn test_codex_timeout_uses_env_when_set() {
+        unsafe {
+            std::env::set_var("PM_CODEX_TIMEOUT_SECS", "2");
+        }
+        assert_eq!(codex_timeout().as_secs(), 2);
+        unsafe {
+            std::env::remove_var("PM_CODEX_TIMEOUT_SECS");
+        }
+    }
+
+    #[test]
+    fn test_load_profile_reads_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let profile_path = tmp.path().join("profile.md");
+        std::fs::write(&profile_path, "Languages: Rust\nDomains: gamedev\n").unwrap();
+        unsafe { std::env::set_var("PM_PROFILE_PATH", &profile_path); }
+        let profile = load_profile(None);
+        unsafe { std::env::remove_var("PM_PROFILE_PATH"); }
+        assert!(profile.contains("Rust"));
+    }
+
+    #[test]
+    fn test_load_profile_falls_back_to_projects() {
+        unsafe { std::env::set_var("PM_PROFILE_PATH", "/tmp/nonexistent-profile-xyz.md"); }
+        let fallback = vec![
+            ("example-app".to_string(), Some("CI check for Steam devs.".to_string())),
+        ];
+        let profile = load_profile(Some(&fallback));
+        unsafe { std::env::remove_var("PM_PROFILE_PATH"); }
+        assert!(profile.contains("example-app"));
     }
 }
