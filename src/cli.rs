@@ -287,6 +287,26 @@ pub fn cmd_status(store: &Store) {
             p.readiness,
             days_stale
         );
+        // Show DOD rollup if DOD.md exists
+        if let Some(ref path) = p.path {
+            if let Some(dod_file) = dod::load_dod(std::path::Path::new(path)) {
+                let (complete, total) = dod::rollup(&dod_file);
+                if total > 0 {
+                    let dod_bar: String = dod_file.criteria.iter().map(|c| {
+                        if c.automated.is_done() && c.human.is_done() { '✓' }
+                        else if c.automated.is_done() { '·' }
+                        else { '✗' }
+                    }).collect();
+                    println!("       DOD: {}/{} [{}]", complete, total, dod_bar);
+                }
+            }
+            // Cut-losses warning
+            if let Ok(Some(rec)) = store.get_research(p.id) {
+                if rec.consecutive_flags >= 2 {
+                    println!("       ⚠  Research recommends re-evaluating this project.");
+                }
+            }
+        }
     }
 
     let suggestions = collect_naming_suggestions(&projects);
@@ -1026,10 +1046,11 @@ fn cmd_show(store: &Store, id: i64) {
     }
     println!();
     if let Some(ref path) = project.path {
+        let project_path = Path::new(path);
         println!("Linked to: {}", path);
 
         // Show roadmap details if present
-        if let Some(rm) = roadmap::load_roadmap(Path::new(path)) {
+        if let Some(rm) = roadmap::load_roadmap(project_path) {
             if let Some(bad_sum) = roadmap::validate_weights(&rm) {
                 println!("⚠  Phase weights sum to {:.2} (expected 1.0)", bad_sum);
             }
@@ -1078,6 +1099,23 @@ fn cmd_show(store: &Store, id: i64) {
             }
             None => {
                 println!("Charter: missing (pm charter {})", id);
+            }
+        }
+
+        // Show DOD status
+        match dod::load_dod(project_path) {
+            None => {
+                println!("DOD: not initialised (pm dod {})", id);
+            }
+            Some(ref dod_file) => {
+                let (complete, total) = dod::rollup(dod_file);
+                println!("DOD: {}/{} criteria complete", complete, total);
+                for c in &dod_file.criteria {
+                    let auto_sym = if c.automated.is_done() { "✓" } else { "–" };
+                    let human_sym = if c.human.is_done() { "✓" } else { "–" };
+                    println!("  [{}] auto:{} human:{}  {}", c.id, auto_sym, human_sym, c.description);
+                }
+                println!();
             }
         }
     } else {
