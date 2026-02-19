@@ -465,13 +465,15 @@ WHAT COMPETITORS COVER:
 DEVELOPER PROFILE:
 {profile}
 
+IMPORTANT: Output ONLY the structured idea blocks below. Do not ask questions. Do not engage in dialogue. Do not explain your reasoning. Just output the blocks.
+
 Generate exactly {count} novel product ideas. Each must:
 1. Exploit a gap the above competitors leave uncovered
 2. Be buildable by this developer given their profile
 3. Be distinct from their existing active projects listed in the profile
 4. Be specific — not "a better X" but a named concept with a clear USP
 
-For each idea respond in exactly this format:
+Respond with ONLY this format repeated {count} times, nothing else:
 ---
 NAME: <short working title>
 USP: <one sentence — what it does and why it's unique>
