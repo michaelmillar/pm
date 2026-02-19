@@ -800,6 +800,9 @@ fn cmd_inbox(store: &Store) {
     println!("INBOX ({} items):\n", projects.len());
     for p in &projects {
         println!("  [{}] {}", p.id, p.name);
+        if let Ok(Some(note)) = store.get_inbox_note(p.id) {
+            println!("       {}", truncate(&note, 60));
+        }
     }
     let possible = store.list_possible_duplicates(0.80).unwrap();
     if !possible.is_empty() {
