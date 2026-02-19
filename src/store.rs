@@ -6,6 +6,14 @@ pub struct Store {
     conn: Connection,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResearchRecord {
+    pub summary: String,
+    pub previous: Option<String>,
+    pub researched_at: Option<String>,
+    pub consecutive_flags: i64,
+}
+
 impl Store {
     pub fn open(path: &std::path::Path) -> Result<Self> {
         let conn = Connection::open(path)?;
@@ -50,6 +58,10 @@ impl Store {
         let _ = self
             .conn
             .execute("ALTER TABLE projects ADD COLUMN cloneability INTEGER", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN research_summary TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN research_previous TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN researched_at TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN research_consecutive_flags INTEGER NOT NULL DEFAULT 0", []);
         Ok(())
     }
 
@@ -358,6 +370,56 @@ impl Store {
         )?;
         Ok(count)
     }
+
+    pub fn save_research(&self, id: i64, summary: &str) -> Result<()> {
+        let today = chrono::Local::now().naive_local().to_string();
+
+        // Detect cut-losses signal
+        let flags_increment = if detect_cut_losses(summary) { 1i64 } else { 0i64 };
+
+        // Reset consecutive flags if no signal, else increment
+        self.conn.execute(
+            "UPDATE projects SET
+                research_previous = research_summary,
+                research_summary = ?1,
+                researched_at = ?2,
+                research_consecutive_flags = CASE
+                    WHEN ?3 = 1 THEN research_consecutive_flags + 1
+                    ELSE 0
+                END
+             WHERE id = ?4",
+            params![summary, today, flags_increment, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_research(&self, id: i64) -> Result<Option<ResearchRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT research_summary, research_previous, researched_at, research_consecutive_flags
+             FROM projects WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => {
+                let summary: Option<String> = row.get(0)?;
+                match summary {
+                    None => Ok(None),
+                    Some(s) => Ok(Some(ResearchRecord {
+                        summary: s,
+                        previous: row.get(1)?,
+                        researched_at: row.get(2)?,
+                        consecutive_flags: row.get(3)?,
+                    })),
+                }
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+fn detect_cut_losses(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("consider stopping") || lower.contains("cut losses")
 }
 
 #[cfg(test)]
@@ -520,5 +582,46 @@ mod tests {
 
         let purged = store.purge_old_deleted(30).unwrap();
         assert_eq!(purged, 1);
+    }
+
+    #[test]
+    fn test_save_and_get_research() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("research-test").unwrap();
+
+        store.save_research(id, "Summary of findings.").unwrap();
+
+        let r = store.get_research(id).unwrap().unwrap();
+        assert_eq!(r.summary, "Summary of findings.");
+        assert!(r.researched_at.is_some());
+        assert!(r.previous.is_none());
+    }
+
+    #[test]
+    fn test_save_research_rotates_previous() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("rotate-test").unwrap();
+
+        store.save_research(id, "First summary.").unwrap();
+        store.save_research(id, "Second summary.").unwrap();
+
+        let r = store.get_research(id).unwrap().unwrap();
+        assert_eq!(r.summary, "Second summary.");
+        assert_eq!(r.previous.as_deref(), Some("First summary."));
+    }
+
+    #[test]
+    fn test_get_research_none_for_unknown() {
+        let store = Store::open_in_memory().unwrap();
+        let result = store.get_research(9999).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_research_none_when_never_researched() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("no-research").unwrap();
+        let result = store.get_research(id).unwrap();
+        assert!(result.is_none());
     }
 }
