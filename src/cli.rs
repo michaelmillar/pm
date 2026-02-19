@@ -116,6 +116,17 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Run automated DOD verification via Claude
+    Verify {
+        /// Project ID
+        id: i64,
+        /// Re-run all criteria including already-passed ones
+        #[arg(long)]
+        all: bool,
+        /// Run only this criterion (e.g. C1)
+        #[arg(long)]
+        criterion: Option<String>,
+    },
     /// Initialise or show a project's Definition of Done
     Dod {
         /// Project ID
@@ -164,6 +175,7 @@ pub fn run() {
         Commands::Park { id, reason } => cmd_park(&store, id, &reason),
         Commands::Tasks { id } => cmd_tasks(&store, id),
         Commands::Charter { id, force } => cmd_charter(&store, id, force),
+        Commands::Verify { id, all, criterion } => cmd_verify(&store, id, all, criterion),
         Commands::Dod { id, show, force } => cmd_dod(&store, id, show, force),
         Commands::Mark {
             id,
@@ -1295,6 +1307,144 @@ fn cmd_mark(store: &Store, id: i64, task_number: usize, plan: Option<String>) {
     }
 }
 
+fn cmd_verify(store: &Store, id: i64, all: bool, criterion_filter: Option<String>) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    let path = match project.path {
+        Some(ref p) => p.clone(),
+        None => {
+            println!("Project '{}' has no linked path. Use: pm link {} <path>", project.name, id);
+            return;
+        }
+    };
+    let project_path = Path::new(&path);
+
+    let mut dod_file = match dod::load_dod(project_path) {
+        Some(d) => d,
+        None => {
+            println!("No DOD.md found. Run: pm dod {}", id);
+            return;
+        }
+    };
+
+    // Build file tree for context
+    let file_tree = build_file_tree(project_path, 50);
+
+    let mut verified_count = 0;
+    let criteria_to_run: Vec<usize> = dod_file.criteria.iter().enumerate()
+        .filter(|(_, c)| {
+            // Filter by criterion ID if specified
+            if let Some(ref filter) = criterion_filter {
+                if &c.id != filter { return false; }
+            }
+            // Skip already-passing unless --all
+            if !all && c.automated.is_done() { return false; }
+            true
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    if criteria_to_run.is_empty() {
+        println!("No criteria to verify. All passing? Use --all to re-run.");
+        return;
+    }
+
+    println!("Verifying {} criterion/criteria for '{}' via Claude...\n", criteria_to_run.len(), project.name);
+
+    for idx in criteria_to_run {
+        let c = &dod_file.criteria[idx];
+        println!("[{}] {}...", c.id, truncate(&c.description, 50));
+
+        // Load evidence file if hint exists
+        let evidence_content = c.evidence.as_ref().and_then(|hint| {
+            // Strip backticks from evidence hint
+            let clean = hint.trim_matches('`');
+            let ev_path = project_path.join(clean);
+            std::fs::read_to_string(ev_path).ok()
+        });
+
+        let result = research::run_verify_claude(
+            &project.name,
+            &dod_file.usp,
+            &c.id,
+            &c.description,
+            &c.scenario,
+            c.evidence.as_deref(),
+            evidence_content.as_deref(),
+            &file_tree,
+        );
+
+        let today = chrono::Local::now().date_naive();
+
+        match result {
+            Err(e) => {
+                println!("  Error: {}", e);
+                println!("  Skipping — check that the claude CLI is installed.\n");
+            }
+            Ok(output) => {
+                let (verdict, rationale) = research::parse_verdict(&output);
+                let new_status = match verdict.as_str() {
+                    "pass" => crate::dod::CriterionStatus::Pass { date: today, rationale: rationale.clone() },
+                    "fail" => crate::dod::CriterionStatus::Fail { date: today, rationale: rationale.clone() },
+                    _ => crate::dod::CriterionStatus::Inconclusive { date: today, rationale: rationale.clone() },
+                };
+                println!("  {} — {}", verdict.to_uppercase(), rationale.as_deref().unwrap_or("(no rationale)"));
+                dod_file.criteria[idx].automated = new_status;
+                verified_count += 1;
+            }
+        }
+        println!();
+    }
+
+    // Write updated DOD.md
+    if verified_count > 0 {
+        if let Err(e) = dod::save_dod(project_path, &dod_file) {
+            println!("Error saving DOD.md: {}", e);
+        } else {
+            println!("Updated docs/DOD.md with {} result(s).", verified_count);
+            let (complete, total) = dod::rollup(&dod_file);
+            println!("DOD: {}/{} criteria fully complete.", complete, total);
+        }
+    }
+}
+
+fn build_file_tree(path: &Path, limit: usize) -> String {
+    let mut lines = Vec::new();
+    collect_tree(path, path, 0, &mut lines, limit);
+    lines.join("\n")
+}
+
+fn collect_tree(root: &Path, path: &Path, depth: usize, lines: &mut Vec<String>, limit: usize) {
+    if lines.len() >= limit { return; }
+    if depth > 3 { return; }
+
+    let indent = "  ".repeat(depth);
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+    // Skip hidden dirs and target/
+    if name.starts_with('.') || name == "target" || name == "node_modules" {
+        return;
+    }
+
+    if path.is_dir() && depth > 0 {
+        lines.push(format!("{}{}/", indent, name));
+    }
+
+    if path.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(path) {
+            let mut sorted: Vec<_> = entries.flatten().collect();
+            sorted.sort_by_key(|e| e.file_name());
+            for entry in sorted {
+                collect_tree(root, &entry.path(), depth + 1, lines, limit);
+            }
+        }
+    } else if depth > 0 {
+        lines.push(format!("{}{}", indent, name));
+    }
+}
+
 fn cmd_dod(store: &Store, id: i64, show: bool, force: bool) {
     let project = match store.get_project(id).unwrap() {
         Some(p) => p,
@@ -1365,6 +1515,24 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_cmd_verify_no_linked_path() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("no-path").unwrap();
+        // Should not panic
+        cmd_verify(&store, id, false, None);
+    }
+
+    #[test]
+    fn test_cmd_verify_no_dod_file() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let id = store.add_project("no-dod").unwrap();
+        store.link_project(id, tmp.path().to_string_lossy().as_ref()).unwrap();
+        // Should print message, not panic
+        cmd_verify(&store, id, false, None);
+    }
 
     #[test]
     fn test_cmd_dod_init_creates_file() {
