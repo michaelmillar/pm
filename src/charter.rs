@@ -67,7 +67,7 @@ _TODO: Self-check — score yourself honestly before starting._
 
 const TOTAL_SECTIONS: usize = 9;
 
-pub fn generate_charter(path: &Path, name: &str, force: bool) -> Result<CharterAction, String> {
+pub fn generate_charter(path: &Path, name: &str, force: bool, usp: Option<&str>) -> Result<CharterAction, String> {
     let charter_path = path.join("docs").join("CHARTER.md");
 
     if charter_path.exists() && !force {
@@ -82,6 +82,13 @@ pub fn generate_charter(path: &Path, name: &str, force: bool) -> Result<CharterA
     }
 
     let content = CHARTER_TEMPLATE.replace("{PROJECT_NAME}", name);
+    let content = match usp {
+        Some(u) => content.replace(
+            "_TODO: One sentence describing what this project does and why it's different from alternatives.",
+            u,
+        ),
+        None => content,
+    };
     std::fs::write(&charter_path, content)
         .map_err(|e| format!("Failed to write CHARTER.md: {}", e))?;
 
@@ -160,7 +167,7 @@ mod tests {
     #[test]
     fn test_generate_charter_creates_file() {
         let tmp = TempDir::new().unwrap();
-        let result = generate_charter(tmp.path(), "TestProject", false);
+        let result = generate_charter(tmp.path(), "TestProject", false, None);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), CharterAction::Created);
         assert!(tmp.path().join("docs").join("CHARTER.md").exists());
@@ -169,8 +176,8 @@ mod tests {
     #[test]
     fn test_generate_charter_already_exists() {
         let tmp = TempDir::new().unwrap();
-        generate_charter(tmp.path(), "TestProject", false).unwrap();
-        let result = generate_charter(tmp.path(), "TestProject", false).unwrap();
+        generate_charter(tmp.path(), "TestProject", false, None).unwrap();
+        let result = generate_charter(tmp.path(), "TestProject", false, None).unwrap();
         match result {
             CharterAction::AlreadyExists(filled, total) => {
                 assert_eq!(filled, 0);
@@ -183,15 +190,15 @@ mod tests {
     #[test]
     fn test_generate_charter_force_overwrites() {
         let tmp = TempDir::new().unwrap();
-        generate_charter(tmp.path(), "TestProject", false).unwrap();
-        let result = generate_charter(tmp.path(), "TestProject", true).unwrap();
+        generate_charter(tmp.path(), "TestProject", false, None).unwrap();
+        let result = generate_charter(tmp.path(), "TestProject", true, None).unwrap();
         assert_eq!(result, CharterAction::Overwritten);
     }
 
     #[test]
     fn test_check_charter_unfilled() {
         let tmp = TempDir::new().unwrap();
-        generate_charter(tmp.path(), "Test", false).unwrap();
+        generate_charter(tmp.path(), "Test", false, None).unwrap();
         let status = check_charter(tmp.path());
         assert!(status.exists);
         assert_eq!(status.filled, 0);
@@ -312,9 +319,18 @@ Developers who need X.
     #[test]
     fn test_generate_charter_substitutes_name() {
         let tmp = TempDir::new().unwrap();
-        generate_charter(tmp.path(), "MyProject", false).unwrap();
+        generate_charter(tmp.path(), "MyProject", false, None).unwrap();
         let content = fs::read_to_string(tmp.path().join("docs").join("CHARTER.md")).unwrap();
         assert!(content.contains("MyProject"));
         assert!(!content.contains("{PROJECT_NAME}"));
+    }
+
+    #[test]
+    fn test_generate_charter_with_usp_pre_populates() {
+        let tmp = TempDir::new().unwrap();
+        generate_charter(tmp.path(), "MyIdea", false, Some("Does X uniquely for Y.")).unwrap();
+        let content = fs::read_to_string(tmp.path().join("docs").join("CHARTER.md")).unwrap();
+        assert!(content.contains("Does X uniquely for Y."));
+        assert!(!content.contains("_TODO: One sentence describing"));
     }
 }
