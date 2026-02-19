@@ -387,6 +387,43 @@ fn profile_path() -> std::path::PathBuf {
         .join("profile.md")
 }
 
+#[derive(Debug, Clone)]
+pub struct PivotIdea {
+    pub name: String,
+    pub usp: String,
+    pub gap: String,
+    pub fit: String,
+}
+
+pub fn parse_pivot_ideas(output: &str) -> Vec<PivotIdea> {
+    let mut ideas = Vec::new();
+
+    let blocks: Vec<&str> = output.split("---").collect();
+
+    for block in blocks {
+        let block = block.trim();
+        if block.is_empty() { continue; }
+
+        let mut name = String::new();
+        let mut usp = String::new();
+        let mut gap = String::new();
+        let mut fit = String::new();
+
+        for line in block.lines() {
+            if let Some(v) = line.strip_prefix("NAME:") { name = v.trim().to_string(); }
+            else if let Some(v) = line.strip_prefix("USP:") { usp = v.trim().to_string(); }
+            else if let Some(v) = line.strip_prefix("GAP:") { gap = v.trim().to_string(); }
+            else if let Some(v) = line.strip_prefix("FIT:") { fit = v.trim().to_string(); }
+        }
+
+        if !name.is_empty() && !usp.is_empty() {
+            ideas.push(PivotIdea { name, usp, gap, fit });
+        }
+    }
+
+    ideas
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,5 +563,31 @@ mod tests {
         let profile = load_profile(Some(&fallback));
         unsafe { std::env::remove_var("PM_PROFILE_PATH"); }
         assert!(profile.contains("example-app"));
+    }
+
+    #[test]
+    fn test_parse_pivot_ideas_single() {
+        let output = "---\nNAME: Constituency Engine\nUSP: Procedural UK constituencies for game devs.\nGAP: Competitors built full games, not engine layers.\nFIT: Rust library suits your gamedev background.\n---\n";
+        let ideas = parse_pivot_ideas(output);
+        assert_eq!(ideas.len(), 1);
+        assert_eq!(ideas[0].name, "Constituency Engine");
+        assert!(ideas[0].usp.contains("Procedural"));
+        assert!(ideas[0].gap.contains("engine layers"));
+        assert!(ideas[0].fit.contains("Rust"));
+    }
+
+    #[test]
+    fn test_parse_pivot_ideas_multiple() {
+        let output = "---\nNAME: Idea One\nUSP: Does A.\nGAP: Gap B.\nFIT: Fit C.\n---\nNAME: Idea Two\nUSP: Does D.\nGAP: Gap E.\nFIT: Fit F.\n---\n";
+        let ideas = parse_pivot_ideas(output);
+        assert_eq!(ideas.len(), 2);
+        assert_eq!(ideas[0].name, "Idea One");
+        assert_eq!(ideas[1].name, "Idea Two");
+    }
+
+    #[test]
+    fn test_parse_pivot_ideas_empty() {
+        let ideas = parse_pivot_ideas("No structured output here.");
+        assert!(ideas.is_empty());
     }
 }
