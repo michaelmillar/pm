@@ -13,6 +13,7 @@ pub struct Assessment {
     pub impact: u8,
     pub monetization: u8,
     pub cloneability: Option<u8>,
+    pub uniqueness: Option<u8>,
     pub researched_at: String,
     pub reasoning: Option<String>,
     pub signals: Option<Vec<String>>,
@@ -46,6 +47,7 @@ pub struct RoadmapScores {
     pub impact: Option<u8>,
     pub monetization: Option<u8>,
     pub cloneability: Option<u8>,
+    pub uniqueness: Option<u8>,
     pub assessment_stale: bool,
 }
 
@@ -76,6 +78,7 @@ pub fn extract_scores(roadmap: &Roadmap) -> RoadmapScores {
             impact: None,
             monetization: None,
             cloneability: None,
+            uniqueness: None,
             assessment_stale: false,
         },
         Some(a) => {
@@ -85,6 +88,7 @@ pub fn extract_scores(roadmap: &Roadmap) -> RoadmapScores {
                 impact: Some(a.impact),
                 monetization: Some(a.monetization),
                 cloneability: a.cloneability,
+                uniqueness: a.uniqueness,
                 assessment_stale: stale,
             }
         }
@@ -119,11 +123,13 @@ pub fn scaffold_template(project_name: &str) -> String {
 assessment:
   impact: 7
   monetization: 7
+  uniqueness: 7
   cloneability: 6
   researched_at: "{today}"
   reasoning: |
     Impact N: Describe the audience and pain point solved.
     Monetization N: Describe how it makes money.
+    Uniqueness N: Describe how this differs from existing solutions.
     Cloneability N: Describe how hard it is to replicate the value.
   signals:
     - "Evidence of market demand or competitor pricing"
@@ -278,5 +284,22 @@ phases:
 ";
         let r = roadmap_from_str(yaml);
         assert!(validate_weights(&r).is_none());
+    }
+
+    #[test]
+    fn test_extract_scores_reads_uniqueness() {
+        let yaml = r#"
+project: test
+assessment:
+  impact: 8
+  monetization: 7
+  uniqueness: 6
+  cloneability: 5
+  researched_at: "2026-02-20"
+phases: []
+"#;
+        let roadmap: Roadmap = serde_yaml::from_str(yaml).unwrap();
+        let scores = extract_scores(&roadmap);
+        assert_eq!(scores.uniqueness, Some(6));
     }
 }
