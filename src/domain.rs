@@ -23,6 +23,7 @@ pub struct Project {
     pub duplicate_of: Option<i64>,
     pub possible_duplicate_score: Option<f32>,
     pub cloneability: Option<u8>,
+    pub uniqueness: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +58,7 @@ impl Project {
 
         (self.impact as i32 * 3)
             + (self.monetization as i32 * 2)
+            + (self.uniqueness.unwrap_or(5) as i32 * 2)
             + (self.readiness as i32 / 10 * 4)
             + self.cloneability.unwrap_or(5) as i32
             - staleness_penalty
@@ -77,6 +79,7 @@ mod tests {
             impact,
             monetization,
             readiness,
+            uniqueness: None,
             last_activity: today - chrono::Duration::days(days_stale),
             created_at: today - chrono::Duration::days(30),
             soft_deadline: None,
@@ -113,5 +116,34 @@ mod tests {
 
         let score = very_stale.priority_score(today);
         assert!(score > 0);
+    }
+
+    fn make_project_uniq(impact: u8, monetization: u8, readiness: u8, days_stale: i64, uniqueness: Option<u8>) -> Project {
+        let today = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
+        Project {
+            id: 1,
+            name: "test".to_string(),
+            state: ProjectState::Active,
+            impact,
+            monetization,
+            readiness,
+            uniqueness,
+            last_activity: today - chrono::Duration::days(days_stale),
+            created_at: today - chrono::Duration::days(30),
+            soft_deadline: None,
+            path: None,
+            deleted_at: None,
+            duplicate_of: None,
+            possible_duplicate_score: None,
+            cloneability: None,
+        }
+    }
+
+    #[test]
+    fn test_priority_score_includes_uniqueness() {
+        let today = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
+        let with_uniq    = make_project_uniq(5, 5, 50, 0, Some(8));
+        let without_uniq = make_project_uniq(5, 5, 50, 0, Some(2));
+        assert!(with_uniq.priority_score(today) > without_uniq.priority_score(today));
     }
 }
