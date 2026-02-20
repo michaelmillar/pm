@@ -320,6 +320,7 @@ impl Store {
             duplicate_of,
             possible_duplicate_score,
             cloneability,
+            uniqueness: None,
         })
     }
 
