@@ -174,6 +174,47 @@ CLONEABILITY: N
     run_with_fallback(&prompt, &["WebSearch", "WebFetch"])
 }
 
+/// Score the four axes from an existing research summary without running a new web search.
+pub fn run_score_from_summary(project_name: &str, summary: &str) -> Result<String, String> {
+    let prompt = format!(
+        r#"You are scoring a project based on existing competitive research. Do not search the web.
+
+Project: {name}
+
+Existing research summary:
+{summary}
+
+Based solely on the research above, score each axis 1-10.
+
+IMPACT: N
+  1 = nice-to-have for a tiny niche
+  5 = clear pain point for a defined audience
+  10 = urgent need for a large, underserved market
+
+MONETISATION: N
+  1 = no plausible revenue model
+  5 = clear model but uncertain willingness to pay
+  10 = strong TAM, proven willingness to pay in adjacent markets
+
+UNIQUENESS: N
+  1 = direct clone of existing products, no meaningful differentiation
+  5 = distinct in some ways but competes with established alternatives
+  10 = genuine Blue Ocean — solves the problem in a way nothing else does
+
+CLONEABILITY: N
+  1 = anyone could replicate this in a weekend
+  5 = requires significant domain expertise or integration work
+  10 = near-impossible to replicate (proprietary data, network effects, ecosystem lock-in)
+
+Output only the four lines above with N replaced by your score. No other text."#,
+        name = project_name,
+        summary = summary,
+    );
+
+    // No web tools needed — pure reasoning from existing text
+    run_with_fallback(&prompt, &[])
+}
+
 /// Call the claude CLI to generate a diff between two research summaries.
 pub fn run_diff_claude(project_name: &str, usp: &str, previous: &str, current: &str, previous_date: &str) -> Result<String, String> {
     let prompt = format!(
