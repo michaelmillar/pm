@@ -246,6 +246,7 @@ fn enrich_with_roadmap(project: &mut crate::domain::Project) {
     if let Some(v) = scores.impact { project.impact = v; }
     if let Some(v) = scores.monetization { project.monetization = v; }
     project.cloneability = scores.cloneability;
+    project.uniqueness = scores.uniqueness;
 }
 
 fn cmd_next(store: &Store) {
