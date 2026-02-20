@@ -63,6 +63,7 @@ impl Store {
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN researched_at TEXT", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN research_consecutive_flags INTEGER NOT NULL DEFAULT 0", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN inbox_note TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN uniqueness INTEGER", []);
         Ok(())
     }
 
@@ -77,7 +78,7 @@ impl Store {
 
     pub fn get_project(&self, id: i64) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE id = ?1",
         )?;
 
@@ -90,7 +91,7 @@ impl Store {
 
     pub fn list_active_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE state = 'active' AND deleted_at IS NULL AND duplicate_of IS NULL ORDER BY name",
         )?;
 
@@ -104,7 +105,7 @@ impl Store {
 
     pub fn list_inbox_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE state = 'inbox' AND deleted_at IS NULL AND duplicate_of IS NULL ORDER BY created_at DESC",
         )?;
 
@@ -118,7 +119,7 @@ impl Store {
 
     pub fn list_linked_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE path IS NOT NULL AND state = 'active' AND deleted_at IS NULL AND duplicate_of IS NULL ORDER BY name",
         )?;
 
@@ -132,7 +133,7 @@ impl Store {
 
     pub fn get_project_by_path(&self, path: &str) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE path = ?1 AND deleted_at IS NULL",
         )?;
 
@@ -225,7 +226,7 @@ impl Store {
 
     pub fn list_possible_duplicates(&self, min_score: f32) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE deleted_at IS NULL AND duplicate_of IS NULL AND possible_duplicate_score >= ?1
              ORDER BY possible_duplicate_score DESC, name",
         )?;
@@ -302,6 +303,7 @@ impl Store {
         let duplicate_of: Option<i64> = row.get(11)?;
         let possible_duplicate_score: Option<f32> = row.get(12)?;
         let cloneability: Option<u8> = row.get(13)?;
+        let uniqueness: Option<u8> = row.get(14)?;
 
         Ok(Project {
             id: row.get(0)?,
@@ -320,7 +322,7 @@ impl Store {
             duplicate_of,
             possible_duplicate_score,
             cloneability,
-            uniqueness: None,
+            uniqueness,
         })
     }
 
@@ -330,10 +332,11 @@ impl Store {
         impact: u8,
         monetization: u8,
         cloneability: Option<u8>,
+        uniqueness: Option<u8>,
     ) -> Result<usize> {
         let count = self.conn.execute(
-            "UPDATE projects SET impact = ?1, monetization = ?2, cloneability = ?3 WHERE id = ?4",
-            params![impact, monetization, cloneability, id],
+            "UPDATE projects SET impact = ?1, monetization = ?2, cloneability = ?3, uniqueness = ?4 WHERE id = ?5",
+            params![impact, monetization, cloneability, uniqueness, id],
         )?;
         Ok(count)
     }
@@ -357,7 +360,7 @@ impl Store {
 
     pub fn list_deleted_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
         )?;
 
@@ -371,7 +374,7 @@ impl Store {
 
     pub fn list_projects_for_dedupe(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
              FROM projects WHERE deleted_at IS NULL AND duplicate_of IS NULL",
         )?;
 
@@ -673,5 +676,31 @@ mod tests {
         store.set_inbox_note(id, "Second note.").unwrap();
         let note = store.get_inbox_note(id).unwrap();
         assert_eq!(note.as_deref(), Some("Second note."));
+    }
+
+    #[test]
+    fn test_schema_has_uniqueness_column() {
+        let store = Store::open_in_memory().unwrap();
+        let mut stmt = store.conn.prepare("PRAGMA table_info(projects)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(cols.contains(&"uniqueness".to_string()));
+    }
+
+    #[test]
+    fn test_update_assessment_stores_uniqueness() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.add_project("test").unwrap();
+
+        store.update_assessment(id, 8, 7, Some(6), Some(5)).unwrap();
+
+        let project = store.get_project(id).unwrap().unwrap();
+        assert_eq!(project.impact, 8);
+        assert_eq!(project.monetization, 7);
+        assert_eq!(project.cloneability, Some(6));
+        assert_eq!(project.uniqueness, Some(5));
     }
 }

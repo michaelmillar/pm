@@ -2024,7 +2024,7 @@ mod tests {
     fn test_update_assessment_stores_scores() {
         let store = Store::open_in_memory().unwrap();
         let id = store.add_project("assess-me").unwrap();
-        store.update_assessment(id, 8, 7, Some(6)).unwrap();
+        store.update_assessment(id, 8, 7, Some(6), None).unwrap();
 
         let project = store.get_project(id).unwrap().unwrap();
         assert_eq!(project.impact, 8);
