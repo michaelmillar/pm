@@ -789,6 +789,12 @@ fn run_research_for_project(store: &Store, id: i64, force: bool) {
                     println!("   Run 'pm research {} --full' to review.", id);
                 }
             }
+
+            // Next steps signpost
+            println!("\nNext steps:");
+            println!("  pm research {} --score     score axes from this summary", id);
+            println!("  pm pivot {}                generate pivot ideas from this landscape", id);
+            println!("  pm show {}                 see updated scores and roadmap", id);
         }
     }
 }
