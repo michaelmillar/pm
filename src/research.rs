@@ -88,6 +88,30 @@ pub fn detect_cut_losses(text: &str) -> bool {
     lower.contains("consider stopping") || lower.contains("cut losses")
 }
 
+/// Parse IMPACT/MONETISATION/UNIQUENESS/CLONEABILITY scores from Claude output.
+/// Returns (impact, monetisation, uniqueness, cloneability) — each None if absent or unparseable.
+pub fn parse_axis_scores(output: &str) -> (Option<u8>, Option<u8>, Option<u8>, Option<u8>) {
+    let mut impact = None;
+    let mut monetisation = None;
+    let mut uniqueness = None;
+    let mut cloneability = None;
+
+    for line in output.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("IMPACT:") {
+            impact = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+        } else if let Some(v) = line.strip_prefix("MONETISATION:") {
+            monetisation = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+        } else if let Some(v) = line.strip_prefix("UNIQUENESS:") {
+            uniqueness = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+        } else if let Some(v) = line.strip_prefix("CLONEABILITY:") {
+            cloneability = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+        }
+    }
+
+    (impact, monetisation, uniqueness, cloneability)
+}
+
 /// Call the claude CLI to run competitive research for a project.
 /// Returns the raw Claude output or an error message.
 pub fn run_research_claude(project_name: &str, usp: &str) -> Result<String, String> {
@@ -102,7 +126,7 @@ Search for:
 2. Recent market signals (forum discussions, reviews, launch announcements in the last few months)
 3. Any gaps or opportunities in the current landscape
 
-Format your response with exactly these three sections:
+Format your response with exactly these sections:
 
 ## Competitors
 [List each competitor with: name, URL, one-line description, similarity level (high/medium/low)]
@@ -115,7 +139,34 @@ Overall: [crowded/competitive/niche/novel] - one sentence.
 Key differentiators needed:
 - [bullet 1]
 - [bullet 2]
-Recommendation: [one paragraph - should the project continue, pivot, or consider stopping? Be direct.]"#,
+Recommendation: [one paragraph - should the project continue, pivot, or consider stopping? Be direct.]
+
+## Axis Scores
+Score each axis 1-10. Output ONLY the lines below, no extra text.
+
+IMPACT: N
+  1 = nice-to-have for a tiny niche
+  5 = clear pain point for a defined audience
+  10 = urgent need for a large, underserved market
+  Evidence: [who has this pain, how often, how severe]
+
+MONETISATION: N
+  1 = no plausible revenue model
+  5 = clear model but uncertain willingness to pay
+  10 = strong TAM, proven willingness to pay in adjacent markets
+  Evidence: [comparable products, price points, market size]
+
+UNIQUENESS: N
+  1 = direct clone of existing products, no meaningful differentiation
+  5 = distinct in some ways but competes with established alternatives
+  10 = genuine Blue Ocean — solves the problem in a way nothing else does
+  Evidence: [name 2-3 closest competitors and how this differs]
+
+CLONEABILITY: N
+  1 = anyone could replicate this in a weekend
+  5 = requires significant domain expertise or integration work
+  10 = near-impossible to replicate (proprietary data, network effects, ecosystem lock-in)
+  Evidence: [what creates the moat — data, network, switching cost, or brand]"#,
         name = project_name,
         usp = usp,
     );
@@ -654,6 +705,26 @@ mod tests {
     fn test_parse_pivot_ideas_empty() {
         let ideas = parse_pivot_ideas("No structured output here.");
         assert!(ideas.is_empty());
+    }
+
+    #[test]
+    fn test_parse_axis_scores_extracts_all_four() {
+        let output = "IMPACT: 8\nMONETISATION: 7\nUNIQUENESS: 6\nCLONEABILITY: 9\nsome other text";
+        let scores = parse_axis_scores(output);
+        assert_eq!(scores.0, Some(8));
+        assert_eq!(scores.1, Some(7));
+        assert_eq!(scores.2, Some(6));
+        assert_eq!(scores.3, Some(9));
+    }
+
+    #[test]
+    fn test_parse_axis_scores_returns_none_for_missing() {
+        let output = "IMPACT: 7\nsome other text";
+        let scores = parse_axis_scores(output);
+        assert_eq!(scores.0, Some(7));
+        assert_eq!(scores.1, None);
+        assert_eq!(scores.2, None);
+        assert_eq!(scores.3, None);
     }
 
     #[test]
