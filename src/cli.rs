@@ -63,6 +63,9 @@ enum Commands {
         /// Run research for all overdue active projects
         #[arg(long)]
         scheduled: bool,
+        /// Score axes from existing research summary without re-running web search
+        #[arg(long)]
+        score: bool,
     },
     /// Show your top 3 priority projects
     Throne,
@@ -199,8 +202,8 @@ pub fn run() {
         Commands::Done { id } => cmd_done(&store, id),
         Commands::Add { name } => cmd_add(&store, &name),
         Commands::Roadmap { id, add_component, force } => cmd_roadmap(&store, id, add_component, force),
-        Commands::Research { id, diff, full, refresh, scheduled } => {
-            cmd_research(&store, id, diff, full, refresh, scheduled)
+        Commands::Research { id, diff, full, refresh, scheduled, score } => {
+            cmd_research(&store, id, diff, full, refresh, scheduled, score)
         }
         Commands::Throne => cmd_throne(&store),
         Commands::Why => cmd_why(&store),
@@ -624,7 +627,7 @@ fn build_roadmap_yaml(
     yaml
 }
 
-fn cmd_research(store: &Store, id: Option<i64>, show_diff: bool, show_full: bool, refresh: bool, scheduled: bool) {
+fn cmd_research(store: &Store, id: Option<i64>, show_diff: bool, show_full: bool, refresh: bool, scheduled: bool, score: bool) {
     let freq = research::load_frequency();
 
     if scheduled {
@@ -658,6 +661,11 @@ fn cmd_research(store: &Store, id: Option<i64>, show_diff: bool, show_full: bool
         }
     };
 
+    if score {
+        cmd_research_score(store, id);
+        return;
+    }
+
     run_research_for_project(store, id, refresh || show_diff || show_full);
 
     if show_diff {
@@ -667,6 +675,46 @@ fn cmd_research(store: &Store, id: Option<i64>, show_diff: bool, show_full: bool
     if show_full {
         print_research_full(store, id);
         return;
+    }
+}
+
+fn cmd_research_score(store: &Store, id: i64) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    let rec = match store.get_research(id).unwrap() {
+        Some(r) => r,
+        None => {
+            println!("No research data for '{}'. Run 'pm research {}' first.", project.name, id);
+            return;
+        }
+    };
+
+    println!("Scoring axes for '{}' from existing research (no web search)...", project.name);
+
+    match research::run_score_from_summary(&project.name, &rec.summary) {
+        Err(e) => println!("Error: {}", e),
+        Ok(output) => {
+            let (parsed_impact, parsed_monetisation, parsed_uniqueness, parsed_cloneability) =
+                research::parse_axis_scores(&output);
+            if parsed_impact.is_none() && parsed_monetisation.is_none()
+                && parsed_uniqueness.is_none() && parsed_cloneability.is_none()
+            {
+                println!("Could not extract scores from summary. Try 'pm research {} --refresh'.", id);
+                return;
+            }
+            let impact_val = parsed_impact.unwrap_or(project.impact);
+            let monet_val  = parsed_monetisation.unwrap_or(project.monetization);
+            store.update_assessment(id, impact_val, monet_val, parsed_cloneability, parsed_uniqueness).unwrap();
+            println!("Scores updated:");
+            println!("  impact:{}  monetisation:{}  uniqueness:{}  cloneability:{}",
+                impact_val,
+                monet_val,
+                parsed_uniqueness.map_or("—".to_string(), |v| v.to_string()),
+                parsed_cloneability.map_or("—".to_string(), |v| v.to_string()),
+            );
+        }
     }
 }
 
@@ -1987,19 +2035,19 @@ mod tests {
     fn test_cmd_research_no_id_prints_help() {
         let store = Store::open_in_memory().unwrap();
         // Should not panic
-        cmd_research(&store, None, false, false, false, false);
+        cmd_research(&store, None, false, false, false, false, false);
     }
 
     #[test]
     fn test_cmd_research_project_not_found() {
         let store = Store::open_in_memory().unwrap();
-        cmd_research(&store, Some(9999), false, false, false, false);
+        cmd_research(&store, Some(9999), false, false, false, false, false);
     }
 
     #[test]
     fn test_cmd_research_scheduled_no_projects() {
         let store = Store::open_in_memory().unwrap();
-        cmd_research(&store, None, false, false, false, true);
+        cmd_research(&store, None, false, false, false, true, false);
     }
 
     #[test]
