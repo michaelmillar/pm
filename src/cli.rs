@@ -101,6 +101,11 @@ enum Commands {
         /// Project ID
         id: i64,
     },
+    /// Move a project to active
+    Activate {
+        /// Project ID
+        id: i64,
+    },
     /// Rename a project
     Rename {
         /// Project ID
@@ -207,6 +212,7 @@ pub fn run() {
         Commands::Trash => cmd_trash(&store),
         Commands::Restore { id } => cmd_restore(&store, id),
         Commands::Unscore { id } => cmd_unscore(&store, id),
+        Commands::Activate { id } => cmd_activate(&store, id),
         Commands::Rename { id, name } => cmd_rename(&store, id, &name),
         Commands::Park { id, reason } => cmd_park(&store, id, &reason),
         Commands::Tasks { id } => cmd_tasks(&store, id),
@@ -379,6 +385,15 @@ fn cmd_unscore(store: &Store, id: i64) {
     println!("Project {} moved to inbox", id);
 }
 
+fn cmd_activate(store: &Store, id: i64) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    store.update_state(id, crate::domain::ProjectState::Active).unwrap();
+    println!("'{}' is now active. Run 'pm status' to see it.", project.name);
+}
+
 fn cmd_add(store: &Store, name: &str) {
     let id = store.add_project(name).unwrap();
     println!("Added project '{}' to inbox (id: {})", name, id);
@@ -428,8 +443,10 @@ fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>, force
     }
 
     if yaml_path.exists() && !force {
+        store.update_state(id, crate::domain::ProjectState::Active).ok();
         println!("docs/roadmap.yaml already exists for '{}'.", project.name);
         println!("Edit it directly, use --add-component to register a new repo, or --force to rebuild from plan files.");
+        println!("'{}' is now active.", project.name);
         return;
     }
 
