@@ -117,6 +117,121 @@ pub fn is_assessment_stale(researched_at: &str) -> bool {
     (today - date).num_days() > 90
 }
 
+/// Update the four axis scores and `researched_at` in the project's `docs/roadmap.yaml` in-place.
+/// Preserves all other content (phases, reasoning, signals) unchanged.
+/// Inserts missing fields (`uniqueness`, `cloneability`, `researched_at`) if absent.
+pub fn patch_assessment_scores(
+    project_path: &std::path::Path,
+    impact: u8,
+    monetization: u8,
+    cloneability: Option<u8>,
+    uniqueness: Option<u8>,
+) -> Result<(), String> {
+    let yaml_path = project_path.join("docs").join("roadmap.yaml");
+    let content = std::fs::read_to_string(&yaml_path)
+        .map_err(|e| format!("Could not read roadmap.yaml: {}", e))?;
+
+    let today = chrono::Local::now().date_naive().to_string();
+    let mut out: Vec<String> = Vec::new();
+    let mut in_assessment = false;
+    let mut found_uniqueness = false;
+    let mut found_cloneability = false;
+    let mut found_researched_at = false;
+    let mut last_score_idx: usize = 0;
+
+    for line in content.lines() {
+        if line.starts_with("assessment:") {
+            in_assessment = true;
+            out.push(line.to_string());
+            continue;
+        }
+        // Leave the assessment block when we see a non-blank, non-indented line
+        if in_assessment && !line.starts_with("  ") && !line.trim().is_empty() {
+            in_assessment = false;
+        }
+        if in_assessment {
+            if line.starts_with("  impact:") {
+                out.push(format!("  impact: {}", impact));
+                last_score_idx = out.len() - 1;
+                continue;
+            }
+            if line.starts_with("  monetization:") {
+                out.push(format!("  monetization: {}", monetization));
+                last_score_idx = out.len() - 1;
+                continue;
+            }
+            if line.starts_with("  cloneability:") {
+                found_cloneability = true;
+                if let Some(c) = cloneability {
+                    out.push(format!("  cloneability: {}", c));
+                } else {
+                    out.push(line.to_string());
+                }
+                last_score_idx = out.len() - 1;
+                continue;
+            }
+            if line.starts_with("  uniqueness:") {
+                found_uniqueness = true;
+                if let Some(u) = uniqueness {
+                    out.push(format!("  uniqueness: {}", u));
+                } else {
+                    out.push(line.to_string());
+                }
+                last_score_idx = out.len() - 1;
+                continue;
+            }
+            if line.starts_with("  researched_at:") {
+                // Insert any missing score fields before researched_at
+                if !found_uniqueness {
+                    if let Some(u) = uniqueness {
+                        out.push(format!("  uniqueness: {}", u));
+                        last_score_idx = out.len() - 1;
+                        found_uniqueness = true;
+                    }
+                }
+                if !found_cloneability {
+                    if let Some(c) = cloneability {
+                        out.push(format!("  cloneability: {}", c));
+                        last_score_idx = out.len() - 1;
+                        found_cloneability = true;
+                    }
+                }
+                out.push(format!("  researched_at: \"{}\"", today));
+                found_researched_at = true;
+                continue;
+            }
+        }
+        out.push(line.to_string());
+    }
+
+    // If researched_at was absent, insert all missing fields after the last score line
+    if !found_researched_at {
+        if !found_uniqueness {
+            if let Some(u) = uniqueness {
+                out.insert(last_score_idx + 1, format!("  uniqueness: {}", u));
+                last_score_idx += 1;
+            }
+        }
+        if !found_cloneability {
+            if let Some(c) = cloneability {
+                out.insert(last_score_idx + 1, format!("  cloneability: {}", c));
+                last_score_idx += 1;
+            }
+        }
+        out.insert(last_score_idx + 1, format!("  researched_at: \"{}\"", today));
+    }
+
+    let mut new_content = out.join("\n");
+    if content.ends_with('\n') {
+        new_content.push('\n');
+    }
+
+    std::fs::write(&yaml_path, new_content)
+        .map_err(|e| format!("Could not write roadmap.yaml: {}", e))?;
+
+    Ok(())
+}
+
 pub fn scaffold_template(project_name: &str) -> String {
     format!(
         r#"project: {name}
@@ -284,6 +399,45 @@ phases:
 ";
         let r = roadmap_from_str(yaml);
         assert!(validate_weights(&r).is_none());
+    }
+
+    #[test]
+    fn patch_assessment_scores_updates_all_fields() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let yaml = "project: test\nassessment:\n  impact: 7\n  monetization: 7\n  cloneability: 6\n  researched_at: \"2026-02-18\"\n  reasoning: |\n    Old reasoning.\n  signals:\n    - \"old signal\"\nphases: []\n";
+        std::fs::write(docs.join("roadmap.yaml"), yaml).unwrap();
+
+        patch_assessment_scores(tmp.path(), 6, 4, Some(3), Some(8)).unwrap();
+
+        let result = std::fs::read_to_string(docs.join("roadmap.yaml")).unwrap();
+        assert!(result.contains("  impact: 6"), "impact not updated");
+        assert!(result.contains("  monetization: 4"), "monetization not updated");
+        assert!(result.contains("  cloneability: 3"), "cloneability not updated");
+        assert!(result.contains("  uniqueness: 8"), "uniqueness not inserted");
+        let today = chrono::Local::now().date_naive().to_string();
+        assert!(result.contains(&format!("  researched_at: \"{}\"", today)), "researched_at not updated");
+        assert!(result.contains("Old reasoning."), "reasoning lost");
+        assert!(result.contains("old signal"), "signals lost");
+        // Must still parse as valid YAML
+        serde_yaml::from_str::<Roadmap>(&result).expect("result should be valid YAML");
+    }
+
+    #[test]
+    fn patch_assessment_scores_inserts_uniqueness_before_researched_at() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let yaml = "project: test\nassessment:\n  impact: 7\n  monetization: 7\n  cloneability: 6\n  researched_at: \"2026-02-18\"\nphases: []\n";
+        std::fs::write(docs.join("roadmap.yaml"), yaml).unwrap();
+
+        patch_assessment_scores(tmp.path(), 7, 7, Some(6), Some(8)).unwrap();
+
+        let result = std::fs::read_to_string(docs.join("roadmap.yaml")).unwrap();
+        let u_pos = result.find("  uniqueness: 8").expect("uniqueness missing");
+        let r_pos = result.find("  researched_at:").expect("researched_at missing");
+        assert!(u_pos < r_pos, "uniqueness should appear before researched_at");
     }
 
     #[test]
