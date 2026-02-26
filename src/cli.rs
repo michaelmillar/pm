@@ -707,6 +707,17 @@ fn cmd_research_score(store: &Store, id: i64) {
             let impact_val = parsed_impact.unwrap_or(project.impact);
             let monet_val  = parsed_monetisation.unwrap_or(project.monetization);
             store.update_assessment(id, impact_val, monet_val, parsed_cloneability, parsed_uniqueness).unwrap();
+            if let Some(ref path) = project.path {
+                if let Err(e) = roadmap::patch_assessment_scores(
+                    std::path::Path::new(path),
+                    impact_val,
+                    monet_val,
+                    parsed_cloneability,
+                    parsed_uniqueness,
+                ) {
+                    eprintln!("Warning: could not update roadmap.yaml: {}", e);
+                }
+            }
             println!("Scores updated:");
             println!("  impact:{}  monetisation:{}  uniqueness:{}  cloneability:{}",
                 impact_val,
@@ -771,6 +782,13 @@ fn run_research_for_project(store: &Store, id: i64, force: bool) {
                 let impact_val = parsed_impact.unwrap_or(project.impact);
                 let monet_val  = parsed_monetisation.unwrap_or(project.monetization);
                 store.update_assessment(id, impact_val, monet_val, parsed_cloneability, parsed_uniqueness).unwrap();
+                let _ = roadmap::patch_assessment_scores(
+                    std::path::Path::new(&path),
+                    impact_val,
+                    monet_val,
+                    parsed_cloneability,
+                    parsed_uniqueness,
+                );
             }
 
             println!("\n'{}' research complete.", project.name);
