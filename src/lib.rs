@@ -1,3 +1,4 @@
+pub mod api;
 pub mod charter;
 pub mod cli_core;
 pub mod cli;

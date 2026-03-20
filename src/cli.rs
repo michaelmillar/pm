@@ -1,3 +1,4 @@
+use crate::api;
 use crate::charter;
 use crate::discovery;
 use crate::dod;
@@ -190,6 +191,12 @@ enum Commands {
         #[arg(long)]
         refresh: bool,
     },
+    /// Start the web dashboard
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "3141")]
+        port: u16,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -244,7 +251,14 @@ pub fn run() {
             plan,
         } => cmd_mark(&store, id, task_number, plan),
         Commands::Pivot { id, count, refresh } => cmd_pivot(&store, id, count, refresh),
+        Commands::Serve { port } => cmd_serve(store, port),
     }
+}
+
+fn cmd_serve(store: Store, port: u16) {
+    let state = std::sync::Arc::new(std::sync::Mutex::new(store));
+    let rt = tokio::runtime::Runtime::new().expect("Failed to start async runtime");
+    rt.block_on(api::serve(state, port));
 }
 
 fn open_store() -> Store {
