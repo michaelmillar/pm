@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fetchProjects } from "../lib/api";
   import type { Project } from "../lib/types";
+  import ProjectIcon from "../lib/ProjectIcon.svelte";
 
   let projects: Project[] = $state([]);
   let loading = $state(true);
@@ -97,7 +98,7 @@
     <tbody>
       {#each sorted as p}
         <tr onclick={() => (window.location.hash = `#/project/${p.id}`)}>
-          <td class="name-cell">{p.name}</td>
+          <td class="name-cell"><ProjectIcon name={p.name} size={22} /> {p.name}</td>
           <td>
             <span class="readiness-bar">
               {#each readinessSegments(p.readiness) as filled}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-hidden="true">
+  <rect width="64" height="64" rx="14" fill="#f7f4ed"/>
+  <text x="32" y="44" font-family="Georgia, serif" font-size="36" font-weight="bold" fill="#1e3a5f" text-anchor="middle">pm</text>
+  <rect x="10" y="52" width="44" height="3" rx="1.5" fill="#1e3a5f" opacity="0.3"/>
+</svg>

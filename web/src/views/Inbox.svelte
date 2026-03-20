@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fetchInbox } from "../lib/api";
   import type { Project } from "../lib/types";
+  import ProjectIcon from "../lib/ProjectIcon.svelte";
 
   let projects: Project[] = $state([]);
   let loading = $state(true);
@@ -35,7 +36,7 @@
       {#each projects as p}
         <tr onclick={() => (window.location.hash = `#/project/${p.id}`)}>
           <td class="num">{p.id}</td>
-          <td class="name-cell">{p.name}</td>
+          <td class="name-cell"><ProjectIcon name={p.name} size={22} /> {p.name}</td>
           <td style="font-size: 0.85rem; color: var(--ink-soft)">{p.created_at}</td>
           <td class="num">{p.impact}</td>
           <td class="num">{p.monetization}</td>
