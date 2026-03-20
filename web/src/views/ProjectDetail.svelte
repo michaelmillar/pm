@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fetchProject } from "../lib/api";
   import type { ProjectDetail as PD } from "../lib/types";
+  import ProjectIcon from "../lib/ProjectIcon.svelte";
 
   let { id }: { id: number } = $props();
   let detail: PD | null = $state(null);
@@ -27,6 +28,7 @@
   <div class="loading">Loading...</div>
 {:else if detail}
   <div class="detail-header">
+    <ProjectIcon name={detail.name} size={32} />
     <h2>{detail.name}</h2>
     <span class="state-badge">{detail.state}</span>
     {#if detail.soft_deadline}
