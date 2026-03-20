@@ -4,12 +4,11 @@ use crate::dod;
 use crate::roadmap;
 use crate::research;
 use crate::domain::{ProjectState, TaskSource};
-use crate::naming;
 use crate::scanner;
 use crate::standards;
 use crate::store::Store;
 use chrono::Local;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -25,7 +24,11 @@ enum Commands {
     /// Shows what you should work on next
     Next,
     /// Quick status overview of all active projects
-    Status,
+    Status {
+        /// Sort active projects by this column
+        #[arg(long, value_enum, default_value_t = StatusSort::Score)]
+        sort: StatusSort,
+    },
     /// Mark a project task as done
     Done {
         /// Project ID
@@ -189,6 +192,18 @@ enum Commands {
     },
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum StatusSort {
+    Score,
+    Readiness,
+    Stale,
+    Name,
+    Impact,
+    Monetization,
+    Uniqueness,
+    Cloneability,
+}
+
 pub fn run() {
     let cli = Cli::parse();
     let store = open_store();
@@ -198,7 +213,7 @@ pub fn run() {
 
     match cli.command {
         Commands::Next => cmd_next(&store),
-        Commands::Status => cmd_status(&store),
+        Commands::Status { sort } => cmd_status_with_sort(&store, sort),
         Commands::Done { id } => cmd_done(&store, id),
         Commands::Add { name } => cmd_add(&store, &name),
         Commands::Roadmap { id, add_component, force } => cmd_roadmap(&store, id, add_component, force),
@@ -286,6 +301,10 @@ fn cmd_next(store: &Store) {
 }
 
 pub fn cmd_status(store: &Store) {
+    cmd_status_with_sort(store, StatusSort::Score);
+}
+
+fn cmd_status_with_sort(store: &Store, sort: StatusSort) {
     let root = resolve_root_dir();
     let _ = discovery::discover_projects(store, &root);
 
@@ -297,70 +316,90 @@ pub fn cmd_status(store: &Store) {
     }
 
     let today = Local::now().date_naive();
+    sort_projects_for_status(&mut projects, sort, today);
     println!("Active projects:\n");
-    for p in &projects {
+    println!("  ID  S  Project                      Ready             Stale  Score  Impact  Monet  Uniq  Clone  Next");
+    println!("  --  -  ---------------------------  ----------------  -----  -----  ------  -----  ----  -----  ----------------------------------");
+    for (idx, p) in projects.iter().enumerate() {
         let days_stale = (today - p.last_activity).num_days();
         let bar = progress_bar(p.readiness as usize, 10);
         let score = p.priority_score(today);
+        let symbol = project_symbol(idx);
+        let uniq = p.uniqueness.map_or("—".to_string(), |u| u.to_string());
+        let clone = p.cloneability.map_or("—".to_string(), |c| c.to_string());
+        let next = truncate(&next_milestone_for_project(p), 34);
         println!(
-            "  [{}] {} {} {}%  ({} days)",
+            "  {:>2}  {}  {:<27}  {} {:>3}%  {:>4}d  {:>5}  {:>6}  {:>5}  {:>4}  {:>5}  {}",
             p.id,
-            truncate(&p.name, 20),
+            symbol,
+            truncate(&p.name, 27),
             bar,
             p.readiness,
-            days_stale
+            days_stale,
+            score,
+            p.impact,
+            p.monetization,
+            uniq,
+            clone,
+            next
         );
+    }
+}
 
-        // Axes line with ANSI colour
-        let impact_str = format!("\x1b[33mimpact:{}\x1b[0m", p.impact);
-        let monet_str  = format!("\x1b[32mmonetisation:{}\x1b[0m", p.monetization);
-        let uniq_str = match p.uniqueness {
-            Some(u) => format!("\x1b[36muniqueness:{}\x1b[0m", u),
-            None    => "\x1b[2muniqueness:—\x1b[0m".to_string(),
+fn sort_projects_for_status(
+    projects: &mut [crate::domain::Project],
+    sort: StatusSort,
+    today: chrono::NaiveDate,
+) {
+    projects.sort_by(|a, b| {
+        let cmp = match sort {
+            StatusSort::Score => b.priority_score(today).cmp(&a.priority_score(today)),
+            StatusSort::Readiness => b.readiness.cmp(&a.readiness),
+            StatusSort::Stale => (today - b.last_activity).num_days().cmp(&(today - a.last_activity).num_days()),
+            StatusSort::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            StatusSort::Impact => b.impact.cmp(&a.impact),
+            StatusSort::Monetization => b.monetization.cmp(&a.monetization),
+            StatusSort::Uniqueness => b.uniqueness.unwrap_or(0).cmp(&a.uniqueness.unwrap_or(0)),
+            StatusSort::Cloneability => b.cloneability.unwrap_or(0).cmp(&a.cloneability.unwrap_or(0)),
         };
-        let clone_str = match p.cloneability {
-            Some(c) => format!("\x1b[35mcloneability:{}\x1b[0m", c),
-            None    => "\x1b[2mcloneability:—\x1b[0m".to_string(),
-        };
-        println!(
-            "       {}  {}  {}  {}  \x1b[1m→  score:{}\x1b[0m",
-            impact_str, monet_str, uniq_str, clone_str, score
-        );
+        cmp.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+}
 
-        // Research nudge if axes unscored
-        if (p.uniqueness.is_none() || p.cloneability.is_none()) && p.path.is_some() {
-            println!("       \x1b[2m(run 'pm research {}' to score axes)\x1b[0m", p.id);
-        }
-
-        // Show DOD rollup if DOD.md exists
-        if let Some(ref path) = p.path {
-            if let Some(dod_file) = dod::load_dod(std::path::Path::new(path)) {
-                let (complete, total) = dod::rollup(&dod_file);
-                if total > 0 {
-                    let dod_bar: String = dod_file.criteria.iter().map(|c| {
-                        if c.automated.is_done() && c.human.is_done() { '✓' }
-                        else if c.automated.is_done() { '·' }
-                        else { '✗' }
-                    }).collect();
-                    println!("       DOD: {}/{} [{}]", complete, total, dod_bar);
+fn next_milestone_for_project(p: &crate::domain::Project) -> String {
+    let Some(path) = &p.path else {
+        return "—".to_string();
+    };
+    let project_path = Path::new(path);
+    if let Some(rm) = roadmap::load_roadmap(project_path) {
+        for phase in rm.phases {
+            for task in phase.tasks {
+                if !task.done {
+                    return format!("{}: {}", phase.label, task.label);
                 }
             }
-            // Cut-losses warning
-            if let Ok(Some(rec)) = store.get_research(p.id) {
-                if rec.consecutive_flags >= 2 {
-                    println!("       ⚠  Research recommends re-evaluating this project.");
-                }
-            }
         }
+        return "Done".to_string();
     }
 
-    let suggestions = collect_naming_suggestions(&projects);
-    if !suggestions.is_empty() {
-        println!("\nNaming suggestions:");
-        for (id, name, ideas) in suggestions {
-            println!("  [{}] {} -> {}", id, name, ideas.join(", "));
-        }
+    let mut pending: Vec<_> = scanner::list_tasks(project_path)
+        .into_iter()
+        .filter(|t| t.source == TaskSource::Pending)
+        .collect();
+    pending.sort_by(|a, b| {
+        a.plan_file
+            .cmp(&b.plan_file)
+            .then_with(|| a.task_number.cmp(&b.task_number))
+    });
+    if let Some(task) = pending.first() {
+        return format!(
+            "{}#{}: {}",
+            task.plan_file.trim_end_matches(".md"),
+            task.task_number,
+            task.description
+        );
     }
+    "—".to_string()
 }
 
 fn resolve_root_dir() -> PathBuf {
@@ -936,14 +975,6 @@ fn cmd_inbox(store: &Store) {
         }
     }
 
-    let suggestions = collect_naming_suggestions(&projects);
-    if !suggestions.is_empty() {
-        println!("\nNaming suggestions:");
-        for (id, name, ideas) in suggestions {
-            println!("  [{}] {} -> {}", id, name, ideas.join(", "));
-        }
-    }
-
     if !untracked.is_empty() {
         println!("\nUntracked folders:");
         for name in untracked {
@@ -954,60 +985,14 @@ fn cmd_inbox(store: &Store) {
     println!("\nLink and create a roadmap to activate: pm link <id> <path> && pm roadmap <id>");
 }
 
-fn collect_naming_suggestions(
-    projects: &[crate::domain::Project],
-) -> Vec<(i64, String, Vec<String>)> {
-    let mut out = Vec::new();
-    for p in projects {
-        let Some(path) = &p.path else {
-            continue;
-        };
-        let repo_path = Path::new(path);
-        if !repo_path.is_dir() {
-            continue;
-        }
-        let readme = read_readme_text(repo_path);
-        let plans = read_plans_text(repo_path);
-        let ideas = naming::suggest_names(&p.name, &readme, &plans);
-        if !ideas.is_empty() {
-            out.push((p.id, p.name.clone(), ideas));
-        }
-    }
-    out
-}
-
-fn read_readme_text(repo_path: &Path) -> String {
-    if let Ok(entries) = std::fs::read_dir(repo_path) {
-        for entry in entries.flatten() {
-            let file_name = entry.file_name().to_string_lossy().to_lowercase();
-            if file_name.starts_with("readme") {
-                if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                    return content;
-                }
-            }
-        }
-    }
-    String::new()
-}
-
-fn read_plans_text(repo_path: &Path) -> String {
-    let plans_dir = repo_path.join("docs").join("plans");
-    if !plans_dir.is_dir() {
-        return String::new();
-    }
-    let mut combined = String::new();
-    if let Ok(entries) = std::fs::read_dir(plans_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "md").unwrap_or(false) {
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    combined.push_str(&content);
-                    combined.push('\n');
-                }
-            }
-        }
-    }
-    combined
+fn project_symbol(index: usize) -> char {
+    const SYMBOLS: [char; 36] = [
+        '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+        'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U',
+        'V', 'W', 'X', 'Y', 'Z', '*', '+',
+    ];
+    SYMBOLS[index % SYMBOLS.len()]
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -1077,18 +1062,10 @@ fn cmd_scan(store: &Store) {
             let has_roadmap = roadmap::load_roadmap(Path::new(path)).is_some();
             let mut readiness = if has_roadmap {
                 p.readiness
+            } else if result.total_tasks > 0 {
+                ((result.completed_tasks as f32 / result.total_tasks as f32) * 100.0) as u8
             } else {
-                let scan_readiness = if result.total_tasks > 0 {
-                    ((result.completed_tasks as f32 / result.total_tasks as f32) * 100.0) as u8
-                } else {
-                    0
-                };
-                let r = if result.completed_tasks > 0 || p.readiness == 0 {
-                    scan_readiness
-                } else {
-                    p.readiness
-                };
-                r
+                0
             };
             if !has_roadmap {
                 if let Some(cfg) = &standards_config {
@@ -2233,6 +2210,51 @@ mod tests {
 
         let project = store.get_project(id).unwrap().unwrap();
         assert_eq!(project.readiness, 50);
+    }
+
+    #[test]
+    fn test_cmd_scan_resets_stale_readiness_when_no_tasks_found() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = TempDir::new().unwrap();
+
+        // init git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::fs::write(tmp.path().join("README.md"), "init").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial commit"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        let id = setup_project(&store, "scan-reset");
+        store
+            .link_project(id, tmp.path().to_string_lossy().as_ref())
+            .unwrap();
+        store.update_scores(id, 7, 7, 100).unwrap();
+
+        cmd_scan(&store);
+
+        let project = store.get_project(id).unwrap().unwrap();
+        assert_eq!(project.readiness, 0);
     }
 
     #[test]
