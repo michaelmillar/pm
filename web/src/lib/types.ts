@@ -96,3 +96,18 @@ export interface NextRecommendation {
   project: Project | null;
   reason: string;
 }
+
+export interface PipelineProject {
+  id: number;
+  name: string;
+  project_type: string;
+  readiness: number;
+  priority_score: number;
+  milestones: PipelineMilestone[];
+}
+
+export interface PipelineMilestone {
+  name: string;
+  progress: number;
+  target: string | null;
+}

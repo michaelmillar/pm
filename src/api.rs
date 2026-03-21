@@ -403,6 +403,71 @@ async fn list_trash(State(state): State<AppState>) -> Json<Vec<ApiProject>> {
     Json(projects.iter().map(project_to_api).collect())
 }
 
+#[derive(Serialize)]
+struct ApiPipelineProject {
+    id: i64,
+    name: String,
+    project_type: String,
+    readiness: u8,
+    priority_score: i32,
+    milestones: Vec<ApiPipelineMilestone>,
+}
+
+#[derive(Serialize)]
+struct ApiPipelineMilestone {
+    name: String,
+    progress: f64,
+    target: Option<String>,
+}
+
+async fn pipeline_projects(State(state): State<AppState>) -> Json<Vec<ApiPipelineProject>> {
+    let store = state.lock().unwrap();
+    let mut projects = store.list_active_projects().unwrap_or_default();
+    drop(store);
+
+    let today = chrono::Local::now().date_naive();
+
+    let result: Vec<ApiPipelineProject> = projects.iter_mut().map(|p| {
+        // Enrich with live readiness
+        if let Some(ref path) = p.path {
+            let project_path = FsPath::new(path);
+            if let Some(scores) = roadmap::load_scores(project_path) {
+                p.readiness = scores.readiness;
+            } else if let Some(mf) = crate::milestones::load_milestones(project_path) {
+                p.readiness = mf.readiness();
+            }
+        }
+
+        // Load milestones
+        let milestones = p.path.as_ref()
+            .and_then(|path| crate::milestones::load_milestones(FsPath::new(path)))
+            .map(|mf| {
+                mf.milestones.iter().map(|m| {
+                    let total = m.items.len();
+                    let done = m.items.iter().filter(|i| i.done).count();
+                    let progress = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+                    ApiPipelineMilestone {
+                        name: m.name.clone(),
+                        progress,
+                        target: m.target.clone(),
+                    }
+                }).collect()
+            })
+            .unwrap_or_default();
+
+        ApiPipelineProject {
+            id: p.id,
+            name: p.name.clone(),
+            project_type: p.project_type.as_str().to_string(),
+            readiness: p.readiness,
+            priority_score: p.priority_score(today),
+            milestones,
+        }
+    }).collect();
+
+    Json(result)
+}
+
 pub fn api_router(state: AppState) -> Router {
     Router::new()
         .route("/api/projects", get(list_projects))
@@ -411,6 +476,7 @@ pub fn api_router(state: AppState) -> Router {
         .route("/api/next", get(get_next))
         .route("/api/parked", get(list_parked))
         .route("/api/trash", get(list_trash))
+        .route("/api/pipeline", get(pipeline_projects))
         .with_state(state)
 }
 

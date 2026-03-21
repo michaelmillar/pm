@@ -1,4 +1,4 @@
-import type { Project, ProjectDetail, NextRecommendation } from "./types";
+import type { Project, ProjectDetail, NextRecommendation, PipelineProject } from "./types";
 
 const BASE = "/api";
 
@@ -14,3 +14,4 @@ export const fetchInbox = () => get<Project[]>("/inbox");
 export const fetchNext = () => get<NextRecommendation>("/next");
 export const fetchParked = () => get<Project[]>("/parked");
 export const fetchTrash = () => get<Project[]>("/trash");
+export const fetchPipeline = () => get<PipelineProject[]>("/pipeline");
