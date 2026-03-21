@@ -107,8 +107,9 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
 
     if standards_config.is_some() && !standards_reports.is_empty() {
         let report_path = std::env::var("PM_STANDARDS_REPORT")
-            .unwrap_or_else(|_| standards::DEFAULT_REPORT_PATH.to_string());
-        let _ = standards::write_report(Path::new(&report_path), &standards_reports);
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| standards::default_report_path());
+        let _ = standards::write_report(&report_path, &standards_reports);
     }
 
     Ok(())

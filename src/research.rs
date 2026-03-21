@@ -88,7 +88,7 @@ pub fn detect_cut_losses(text: &str) -> bool {
     lower.contains("consider stopping") || lower.contains("cut losses")
 }
 
-/// Parse IMPACT/MONETISATION/UNIQUENESS/CLONEABILITY scores from Claude output.
+/// Parse IMPACT/MONETISATION/UNIQUENESS/CLONEABILITY scores from LLM output.
 /// Returns (impact, monetisation, uniqueness, cloneability) — each None if absent or unparseable.
 pub fn parse_axis_scores(output: &str) -> (Option<u8>, Option<u8>, Option<u8>, Option<u8>) {
     let mut impact = None;
@@ -112,9 +112,9 @@ pub fn parse_axis_scores(output: &str) -> (Option<u8>, Option<u8>, Option<u8>, O
     (impact, monetisation, uniqueness, cloneability)
 }
 
-/// Call the claude CLI to run competitive research for a project.
-/// Returns the raw Claude output or an error message.
-pub fn run_research_claude(project_name: &str, usp: &str) -> Result<String, String> {
+/// Run competitive research via configured LLM provider chain.
+/// Returns the raw LLM output or an error message.
+pub fn run_research(project_name: &str, usp: &str) -> Result<String, String> {
     let prompt = format!(
         r#"Research the competitive landscape for this project and summarise your findings.
 
@@ -215,8 +215,8 @@ Output only the four lines above with N replaced by your score. No other text."#
     run_with_fallback(&prompt, &[])
 }
 
-/// Call the claude CLI to generate a diff between two research summaries.
-pub fn run_diff_claude(project_name: &str, usp: &str, previous: &str, current: &str, previous_date: &str) -> Result<String, String> {
+/// Generate a diff between two research summaries via LLM.
+pub fn run_diff(project_name: &str, usp: &str, previous: &str, current: &str, previous_date: &str) -> Result<String, String> {
     let prompt = format!(
         r#"Compare these two competitive research summaries for the project '{name}' and show what changed.
 
@@ -252,8 +252,8 @@ End with one of:
     run_with_fallback(&prompt, &["WebSearch", "WebFetch"])
 }
 
-/// Call the claude CLI to verify a DOD criterion against a codebase.
-pub fn run_verify_claude(
+/// Verify a DOD criterion against a codebase via LLM.
+pub fn run_verify(
     project_name: &str,
     usp: &str,
     criterion_id: &str,
@@ -303,54 +303,154 @@ RATIONALE: [one paragraph citing specific evidence from the files above]"#,
     run_with_fallback(&prompt, &["Read", "Glob", "Grep"])
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Provider {
-    Claude,
-    Codex,
+/// An LLM provider configuration entry.
+/// Users configure preferred providers in ~/.config/pm/providers.conf.
+#[derive(Debug, Clone)]
+pub struct LlmProvider {
+    pub command: String,
+    pub model: Option<String>,
+}
+
+/// Load configured LLM providers from ~/.config/pm/providers.conf.
+///
+/// Config format (key=value, one per line):
+///   provider_1=claude
+///   model_1=sonnet
+///   provider_2=codex
+///
+/// Defaults to claude (sonnet) with codex as fallback.
+pub fn load_providers() -> Vec<LlmProvider> {
+    let path = providers_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        let mut commands: std::collections::BTreeMap<u8, String> = std::collections::BTreeMap::new();
+        let mut models: std::collections::BTreeMap<u8, String> = std::collections::BTreeMap::new();
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            if let Some(rest) = line.strip_prefix("provider_") {
+                if let Some((num_str, val)) = rest.split_once('=') {
+                    let val = val.trim();
+                    if !val.is_empty() {
+                        if let Ok(n) = num_str.parse::<u8>() {
+                            commands.insert(n, val.to_string());
+                        }
+                    }
+                }
+            } else if let Some(rest) = line.strip_prefix("model_") {
+                if let Some((num_str, val)) = rest.split_once('=') {
+                    let val = val.trim();
+                    if !val.is_empty() {
+                        if let Ok(n) = num_str.parse::<u8>() {
+                            models.insert(n, val.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        let providers: Vec<LlmProvider> = commands
+            .into_iter()
+            .map(|(k, cmd)| LlmProvider {
+                command: cmd,
+                model: models.get(&k).cloned(),
+            })
+            .collect();
+
+        if !providers.is_empty() {
+            return providers;
+        }
+    }
+    default_providers()
+}
+
+fn default_providers() -> Vec<LlmProvider> {
+    vec![
+        LlmProvider { command: "claude".to_string(), model: Some("sonnet".to_string()) },
+        LlmProvider { command: "codex".to_string(), model: None },
+    ]
+}
+
+fn providers_config_path() -> std::path::PathBuf {
+    if let Ok(val) = std::env::var("PM_PROVIDERS_CONFIG") {
+        return std::path::PathBuf::from(val);
+    }
+    dirs::config_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("pm")
+        .join("providers.conf")
 }
 
 fn run_with_fallback(prompt: &str, tools: &[&str]) -> Result<String, String> {
-    run_with_fallback_using(prompt, tools, |provider| match provider {
-        Provider::Claude => run_claude_with_tools(prompt, tools),
-        Provider::Codex => run_codex(prompt),
-    })
+    let providers = load_providers();
+    run_with_fallback_using(&providers, prompt, tools, |p| run_provider(p, prompt, tools))
 }
 
-fn run_with_fallback_using<F>(_prompt: &str, _tools: &[&str], mut runner: F) -> Result<String, String>
+fn run_with_fallback_using<F>(
+    providers: &[LlmProvider],
+    _prompt: &str,
+    _tools: &[&str],
+    mut runner: F,
+) -> Result<String, String>
 where
-    F: FnMut(Provider) -> Result<String, String>,
+    F: FnMut(&LlmProvider) -> Result<String, String>,
 {
-    match runner(Provider::Claude) {
-        Ok(output) => Ok(output),
-        Err(claude_err) => match runner(Provider::Codex) {
-            Ok(output) => {
-                eprintln!(
-                    "Warning: Claude failed ({}). Fell back to Codex.",
-                    compact_error(&claude_err)
-                );
-                Ok(output)
-            }
-            Err(codex_err) => Err(format!(
-                "claude failed: {}; codex fallback failed: {}",
-                compact_error(&claude_err),
-                compact_error(&codex_err)
-            )),
-        },
+    if providers.is_empty() {
+        return Err("No LLM providers configured. Add providers to ~/.config/pm/providers.conf".to_string());
     }
+
+    let mut errors: Vec<(String, String)> = Vec::new();
+    for (i, provider) in providers.iter().enumerate() {
+        match runner(provider) {
+            Ok(output) => {
+                if i > 0 {
+                    let prev_err = errors.last().map(|(_, e)| e.as_str()).unwrap_or("unknown error");
+                    eprintln!(
+                        "Warning: {} failed ({}). Fell back to {}.",
+                        providers[0].command,
+                        compact_error(prev_err),
+                        provider.command,
+                    );
+                }
+                return Ok(output);
+            }
+            Err(e) => {
+                errors.push((provider.command.clone(), e));
+            }
+        }
+    }
+
+    let msg = errors
+        .iter()
+        .map(|(name, err)| format!("{} failed: {}", name, compact_error(err)))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(msg)
 }
 
 fn compact_error(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn run_claude_with_tools(prompt: &str, tools: &[&str]) -> Result<String, String> {
+fn run_provider(provider: &LlmProvider, prompt: &str, tools: &[&str]) -> Result<String, String> {
+    match provider.command.as_str() {
+        "claude" => {
+            let model = provider.model.as_deref().unwrap_or("sonnet");
+            run_claude_style(prompt, tools, model)
+        }
+        "codex" => run_codex_style(prompt),
+        other => run_generic_cli(other, prompt),
+    }
+}
+
+fn run_claude_style(prompt: &str, tools: &[&str], model: &str) -> Result<String, String> {
     let allowed_tools = tools.join(",");
+    let mut args = vec!["-p", prompt, "--model", model];
+    if !allowed_tools.is_empty() {
+        args.extend_from_slice(&["--allowedTools", &allowed_tools]);
+    }
     let output = Command::new("claude")
-        .args([
-            "-p", prompt,
-            "--model", "sonnet",
-            "--allowedTools", &allowed_tools,
-        ])
+        .args(&args)
         .output()
         .map_err(|e| format!("Failed to run claude CLI: {}. Is it installed?", e))?;
 
@@ -358,12 +458,11 @@ fn run_claude_with_tools(prompt: &str, tools: &[&str]) -> Result<String, String>
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("claude CLI failed: {}", stderr));
     }
-
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn run_codex(prompt: &str) -> Result<String, String> {
-    let timeout = codex_timeout();
+fn run_codex_style(prompt: &str) -> Result<String, String> {
+    let timeout = provider_timeout();
     let mut command = Command::new("codex");
     command.args([
         "exec",
@@ -378,12 +477,24 @@ fn run_codex(prompt: &str) -> Result<String, String> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("codex CLI failed: {}", stderr));
     }
-
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn codex_timeout() -> Duration {
-    let secs = std::env::var("PM_CODEX_TIMEOUT_SECS")
+fn run_generic_cli(command_name: &str, prompt: &str) -> Result<String, String> {
+    let timeout = provider_timeout();
+    let mut command = Command::new(command_name);
+    command.arg(prompt);
+    let output = run_command_with_timeout(&mut command, timeout)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("{} CLI failed: {}", command_name, stderr));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn provider_timeout() -> Duration {
+    let secs = std::env::var("PM_PROVIDER_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
@@ -409,7 +520,7 @@ fn run_command_with_timeout(command: &mut Command, timeout: Duration) -> Result<
                 if started.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("codex CLI timed out after {}s", timeout.as_secs()));
+                    return Err(format!("{} timed out after {}s", command.get_program().to_string_lossy(), timeout.as_secs()));
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -418,7 +529,7 @@ fn run_command_with_timeout(command: &mut Command, timeout: Duration) -> Result<
     }
 }
 
-/// Parse the VERDICT/RATIONALE response from claude verify output.
+/// Parse the VERDICT/RATIONALE response from LLM verify output.
 pub fn parse_verdict(output: &str) -> (String, Option<String>) {
     let mut verdict = "inconclusive".to_string();
     let mut rationale_lines: Vec<String> = Vec::new();
@@ -516,7 +627,7 @@ pub fn parse_pivot_ideas(output: &str) -> Vec<PivotIdea> {
     ideas
 }
 
-pub fn run_pivot_claude(
+pub fn run_pivot(
     project_name: &str,
     usp: &str,
     research_summary: Option<&str>,
@@ -524,7 +635,7 @@ pub fn run_pivot_claude(
     count: usize,
 ) -> Result<String, String> {
     let prompt = build_pivot_prompt(project_name, usp, research_summary, profile, count);
-    run_claude_with_tools(&prompt, &["WebSearch", "WebFetch"])
+    run_with_fallback(&prompt, &["WebSearch", "WebFetch"])
 }
 
 pub fn build_pivot_prompt(
@@ -646,57 +757,74 @@ mod tests {
     }
 
     #[test]
-    fn test_fallback_uses_codex_when_claude_fails() {
+    fn test_fallback_uses_second_provider_when_first_fails() {
+        let providers = vec![
+            LlmProvider { command: "primary".to_string(), model: None },
+            LlmProvider { command: "fallback".to_string(), model: None },
+        ];
         let mut seen = Vec::new();
-        let result = run_with_fallback_using("prompt", &["Read"], |provider| {
-            seen.push(provider);
-            match provider {
-                Provider::Claude => Err("claude CLI failed: out of credits".to_string()),
-                Provider::Codex => Ok("ok from codex".to_string()),
+        let result = run_with_fallback_using(&providers, "prompt", &["Read"], |provider| {
+            seen.push(provider.command.clone());
+            if provider.command == "primary" {
+                Err("primary CLI failed: out of credits".to_string())
+            } else {
+                Ok("ok from fallback".to_string())
             }
         })
-        .expect("codex fallback should succeed");
+        .expect("fallback should succeed");
 
-        assert_eq!(result, "ok from codex");
-        assert_eq!(seen, vec![Provider::Claude, Provider::Codex]);
+        assert_eq!(result, "ok from fallback");
+        assert_eq!(seen, vec!["primary", "fallback"]);
     }
 
     #[test]
-    fn test_fallback_keeps_claude_output_when_claude_succeeds() {
+    fn test_fallback_keeps_first_provider_output_when_it_succeeds() {
+        let providers = vec![
+            LlmProvider { command: "primary".to_string(), model: None },
+            LlmProvider { command: "fallback".to_string(), model: None },
+        ];
         let mut seen = Vec::new();
-        let result = run_with_fallback_using("prompt", &["Read"], |provider| {
-            seen.push(provider);
-            match provider {
-                Provider::Claude => Ok("ok from claude".to_string()),
-                Provider::Codex => Ok("ok from codex".to_string()),
+        let result = run_with_fallback_using(&providers, "prompt", &["Read"], |provider| {
+            seen.push(provider.command.clone());
+            if provider.command == "primary" {
+                Ok("ok from primary".to_string())
+            } else {
+                Ok("ok from fallback".to_string())
             }
         })
-        .expect("claude should succeed");
+        .expect("primary should succeed");
 
-        assert_eq!(result, "ok from claude");
-        assert_eq!(seen, vec![Provider::Claude]);
+        assert_eq!(result, "ok from primary");
+        assert_eq!(seen, vec!["primary"]);
     }
 
     #[test]
-    fn test_fallback_errors_when_both_providers_fail() {
-        let result = run_with_fallback_using("prompt", &["Read"], |provider| match provider {
-            Provider::Claude => Err("claude boom".to_string()),
-            Provider::Codex => Err("codex boom".to_string()),
+    fn test_fallback_errors_when_all_providers_fail() {
+        let providers = vec![
+            LlmProvider { command: "primary".to_string(), model: None },
+            LlmProvider { command: "fallback".to_string(), model: None },
+        ];
+        let result = run_with_fallback_using(&providers, "prompt", &["Read"], |provider| {
+            if provider.command == "primary" {
+                Err("primary boom".to_string())
+            } else {
+                Err("fallback boom".to_string())
+            }
         })
-        .expect_err("both providers fail");
+        .expect_err("all providers fail");
 
-        assert!(result.contains("claude failed"));
-        assert!(result.contains("codex fallback failed"));
+        assert!(result.contains("primary failed"));
+        assert!(result.contains("fallback failed"));
     }
 
     #[test]
-    fn test_codex_timeout_uses_env_when_set() {
+    fn test_provider_timeout_uses_env_when_set() {
         unsafe {
-            std::env::set_var("PM_CODEX_TIMEOUT_SECS", "2");
+            std::env::set_var("PM_PROVIDER_TIMEOUT_SECS", "2");
         }
-        assert_eq!(codex_timeout().as_secs(), 2);
+        assert_eq!(provider_timeout().as_secs(), 2);
         unsafe {
-            std::env::remove_var("PM_CODEX_TIMEOUT_SECS");
+            std::env::remove_var("PM_PROVIDER_TIMEOUT_SECS");
         }
     }
 
@@ -715,20 +843,20 @@ mod tests {
     fn test_load_profile_falls_back_to_projects() {
         unsafe { std::env::set_var("PM_PROFILE_PATH", "/tmp/nonexistent-profile-xyz.md"); }
         let fallback = vec![
-            ("example-app".to_string(), Some("CI check for Steam devs.".to_string())),
+            ("acme-widget".to_string(), Some("Dashboard for widget analytics.".to_string())),
         ];
         let profile = load_profile(Some(&fallback));
         unsafe { std::env::remove_var("PM_PROFILE_PATH"); }
-        assert!(profile.contains("example-app"));
+        assert!(profile.contains("acme-widget"));
     }
 
     #[test]
     fn test_parse_pivot_ideas_single() {
-        let output = "---\nNAME: Constituency Engine\nUSP: Procedural UK constituencies for game devs.\nGAP: Competitors built full games, not engine layers.\nFIT: Rust library suits your gamedev background.\n---\n";
+        let output = "---\nNAME: Forecast Engine\nUSP: Hyperlocal weather data for precision agriculture.\nGAP: Competitors built full games, not engine layers.\nFIT: Rust library suits your systems background.\n---\n";
         let ideas = parse_pivot_ideas(output);
         assert_eq!(ideas.len(), 1);
-        assert_eq!(ideas[0].name, "Constituency Engine");
-        assert!(ideas[0].usp.contains("Procedural"));
+        assert_eq!(ideas[0].name, "Forecast Engine");
+        assert!(ideas[0].usp.contains("Hyperlocal"));
         assert!(ideas[0].gap.contains("engine layers"));
         assert!(ideas[0].fit.contains("Rust"));
     }
@@ -771,14 +899,14 @@ mod tests {
     #[test]
     fn test_build_pivot_prompt_includes_key_fields() {
         let prompt = build_pivot_prompt(
-            "Career Politician",
-            "UK political sim",
+            "Weather Dashboard",
+            "Hyperlocal forecasts for farmers",
             Some("Competitor A released in Jan."),
             "Languages: Rust",
             3,
         );
-        assert!(prompt.contains("Career Politician"));
-        assert!(prompt.contains("UK political sim"));
+        assert!(prompt.contains("Weather Dashboard"));
+        assert!(prompt.contains("Hyperlocal forecasts for farmers"));
         assert!(prompt.contains("Competitor A"));
         assert!(prompt.contains("Languages: Rust"));
         assert!(prompt.contains("3"));

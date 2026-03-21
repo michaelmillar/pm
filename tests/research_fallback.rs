@@ -6,7 +6,7 @@ use std::{
     sync::Mutex,
 };
 
-use pm::research::run_research_claude;
+use pm::research::run_research;
 use tempfile::TempDir;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -62,7 +62,7 @@ fn uses_claude_when_claude_succeeds() {
     );
 
     let old = prepend_path(bin_dir);
-    let result = run_research_claude("proj", "usp").expect("claude should succeed");
+    let result = run_research("proj", "usp").expect("claude should succeed");
     restore_path(old);
 
     assert!(result.contains("claude ok"));
@@ -84,7 +84,7 @@ fn falls_back_to_codex_when_claude_fails() {
     );
 
     let old = prepend_path(bin_dir);
-    let result = run_research_claude("proj", "usp").expect("codex fallback should succeed");
+    let result = run_research("proj", "usp").expect("codex fallback should succeed");
     restore_path(old);
 
     assert!(result.contains("codex ok"));
@@ -106,11 +106,11 @@ fn returns_combined_error_when_both_fail() {
     );
 
     let old = prepend_path(bin_dir);
-    let err = run_research_claude("proj", "usp").expect_err("both should fail");
+    let err = run_research("proj", "usp").expect_err("both should fail");
     restore_path(old);
 
     assert!(err.contains("claude failed"));
-    assert!(err.contains("codex fallback failed"));
+    assert!(err.contains("codex failed"));
 }
 
 #[test]
@@ -129,16 +129,16 @@ fn codex_fallback_times_out_fast() {
     );
 
     let old_path = prepend_path(bin_dir);
-    let old_timeout = env::var("PM_CODEX_TIMEOUT_SECS").ok();
+    let old_timeout = env::var("PM_PROVIDER_TIMEOUT_SECS").ok();
     unsafe {
-        env::set_var("PM_CODEX_TIMEOUT_SECS", "1");
+        env::set_var("PM_PROVIDER_TIMEOUT_SECS", "1");
     }
 
-    let err = run_research_claude("proj", "usp").expect_err("codex should time out");
+    let err = run_research("proj", "usp").expect_err("codex should time out");
 
     match old_timeout {
-        Some(value) => unsafe { env::set_var("PM_CODEX_TIMEOUT_SECS", value) },
-        None => unsafe { env::remove_var("PM_CODEX_TIMEOUT_SECS") },
+        Some(value) => unsafe { env::set_var("PM_PROVIDER_TIMEOUT_SECS", value) },
+        None => unsafe { env::remove_var("PM_PROVIDER_TIMEOUT_SECS") },
     }
     restore_path(old_path);
 

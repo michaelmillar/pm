@@ -148,7 +148,7 @@ enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Run automated DOD verification via Claude
+    /// Run automated DOD verification via LLM
     Verify {
         /// Project ID
         id: i64,
@@ -420,7 +420,7 @@ fn resolve_root_dir() -> PathBuf {
     if let Ok(val) = std::env::var("PM_ROOT") {
         return PathBuf::from(val);
     }
-    PathBuf::from("/home/markw/projects")
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join("projects")
 }
 
 fn cmd_done(store: &Store, id: i64) {
@@ -810,9 +810,9 @@ fn run_research_for_project(store: &Store, id: i64, force: bool) {
     let usp = dod::extract_usp_from_charter(std::path::Path::new(&path))
         .unwrap_or_else(|| project.name.clone());
 
-    println!("Researching '{}' via Claude (Codex fallback enabled)...", project.name);
+    println!("Researching '{}'...", project.name);
 
-    match research::run_research_claude(&project.name, &usp) {
+    match research::run_research(&project.name, &usp) {
         Err(e) => println!("Error: {}", e),
         Ok(current_summary) => {
             // Compute diff if we have previous data
@@ -820,13 +820,13 @@ fn run_research_for_project(store: &Store, id: i64, force: bool) {
                 .filter(|r| !r.summary.is_empty())
                 .and_then(|prev| {
                     let prev_date = prev.researched_at.as_deref().unwrap_or("(unknown date)");
-                    research::run_diff_claude(&project.name, &usp, &prev.summary, &current_summary, prev_date).ok()
+                    research::run_diff(&project.name, &usp, &prev.summary, &current_summary, prev_date).ok()
                 });
 
             // Save to DB (rotates previous automatically)
             store.save_research(id, &current_summary).unwrap();
 
-            // Parse and persist axis scores from Claude output
+            // Parse and persist axis scores from LLM output
             let (parsed_impact, parsed_monetisation, parsed_uniqueness, parsed_cloneability) =
                 research::parse_axis_scores(&current_summary);
             if parsed_impact.is_some() || parsed_monetisation.is_some()
@@ -1776,7 +1776,7 @@ fn cmd_verify(store: &Store, id: i64, all: bool, criterion_filter: Option<String
         return;
     }
 
-    println!("Verifying {} criterion/criteria for '{}' via Claude...\n", criteria_to_run.len(), project.name);
+    println!("Verifying {} criterion/criteria for '{}'...\n", criteria_to_run.len(), project.name);
 
     for idx in criteria_to_run {
         let c = &dod_file.criteria[idx];
@@ -1790,7 +1790,7 @@ fn cmd_verify(store: &Store, id: i64, all: bool, criterion_filter: Option<String
             std::fs::read_to_string(ev_path).ok()
         });
 
-        let result = research::run_verify_claude(
+        let result = research::run_verify(
             &project.name,
             &dod_file.usp,
             &c.id,
@@ -1806,7 +1806,7 @@ fn cmd_verify(store: &Store, id: i64, all: bool, criterion_filter: Option<String
         match result {
             Err(e) => {
                 println!("  Error: {}", e);
-                println!("  Skipping — check Claude/Codex CLI availability.\n");
+                println!("  Skipping — check LLM provider CLI availability.\n");
             }
             Ok(output) => {
                 let (verdict, rationale) = research::parse_verdict(&output);
@@ -1980,12 +1980,12 @@ fn cmd_pivot(store: &Store, id: i64, count: usize, _refresh: bool) {
         .collect();
     let profile = research::load_profile(Some(&fallback));
 
-    println!("Generating {} pivot ideas for '{}' via Claude...\n", count, project.name);
+    println!("Generating {} pivot ideas for '{}'...\n", count, project.name);
 
-    let output = match research::run_pivot_claude(&project.name, &usp, research_summary.as_deref(), &profile, count) {
+    let output = match research::run_pivot(&project.name, &usp, research_summary.as_deref(), &profile, count) {
         Err(e) => {
             println!("Error: {}", e);
-            println!("Check that the claude CLI is installed: claude --version");
+            println!("Check that your LLM provider CLI is installed and on PATH.");
             return;
         }
         Ok(o) => o,
