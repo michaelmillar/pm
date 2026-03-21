@@ -38,6 +38,7 @@ pub struct ApiProject {
     pub vibe: Option<u8>,
     pub next_milestone: Option<String>,
     pub milestone_target: Option<String>,
+    pub usp: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -151,6 +152,8 @@ fn project_to_api(p: &crate::domain::Project) -> ApiProject {
         let mf = crate::milestones::load_milestones(FsPath::new(path))?;
         mf.target_summary()
     });
+    let usp = proj.path.as_ref()
+        .and_then(|path| dod::extract_usp_from_charter(FsPath::new(path)));
     ApiProject {
         id: proj.id,
         name: proj.name.clone(),
@@ -171,6 +174,7 @@ fn project_to_api(p: &crate::domain::Project) -> ApiProject {
         path: proj.path.clone(),
         next_milestone: compute_next_milestone(p),
         milestone_target,
+        usp,
     }
 }
 

@@ -97,7 +97,13 @@
     <tbody>
       {#each sorted as p}
         <tr onclick={() => (window.location.hash = `#/project/${p.id}`)}>
-          <td class="name-cell"><ProjectIcon name={p.name} size={22} /> {p.name}</td>
+          <td class="name-cell">
+            <ProjectIcon name={p.name} size={22} />
+            <span class="name-col">
+              <span class="project-name">{p.name}</span>
+              {#if p.usp}<span class="project-usp">{p.usp}</span>{/if}
+            </span>
+          </td>
           <td>
             <span class="readiness-bar">
               {#each readinessSegments(p.readiness) as filled}

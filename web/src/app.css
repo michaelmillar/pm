@@ -156,6 +156,27 @@ td.name-cell {
   gap: 0.5rem;
 }
 
+.name-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.project-name {
+  white-space: nowrap;
+}
+
+.project-usp {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
 /* readiness bar */
 
 .readiness-bar {
