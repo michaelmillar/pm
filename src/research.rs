@@ -174,10 +174,12 @@ MONETISATION: N
   Evidence: [comparable products, price points, market size]
 
 DEFENSIBILITY: N
-  How hard is it to replicate this project's value, considering both differentiation and moat?
-  1 = commodity clone, anyone could replicate this in a weekend
-  5 = differentiated, requires significant domain expertise or integration work
-  10 = proprietary data/network effects, near-impossible to replicate
+  Combines two factors: (a) how unique is this in the market, and (b) how difficult or slow would it be to clone.
+  1 = nothing unique, anyone could replicate this in a weekend
+  3 = minor twist on existing tools, cloneable in weeks
+  5 = meaningfully differentiated, requires significant domain expertise to replicate
+  7 = novel approach with real barriers (proprietary data, deep integrations, regulatory knowledge)
+  10 = genuine moat via network effects, data flywheel, or ecosystem lock-in
   Evidence: [name 2-3 closest competitors, how this differs, what creates the moat]"#,
         name = project_name,
         usp = usp,
@@ -209,10 +211,12 @@ MONETISATION: N
   10 = strong TAM, proven willingness to pay in adjacent markets
 
 DEFENSIBILITY: N
-  How hard is it to replicate this project's value, considering both differentiation and moat?
-  1 = commodity clone, anyone could replicate this in a weekend
-  5 = differentiated, requires significant domain expertise or integration work
-  10 = proprietary data/network effects, near-impossible to replicate
+  Combines two factors: (a) how unique is this in the market, and (b) how difficult or slow would it be to clone.
+  1 = nothing unique, anyone could replicate this in a weekend
+  3 = minor twist on existing tools, cloneable in weeks
+  5 = meaningfully differentiated, requires significant domain expertise to replicate
+  7 = novel approach with real barriers (proprietary data, deep integrations, regulatory knowledge)
+  10 = genuine moat via network effects, data flywheel, or ecosystem lock-in
 
 Output only the three lines above with N replaced by your score. No other text."#,
         name = project_name,

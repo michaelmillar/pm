@@ -463,12 +463,7 @@ fn next_milestone_for_project(p: &crate::domain::Project) -> String {
             .then_with(|| a.task_number.cmp(&b.task_number))
     });
     if let Some(task) = pending.first() {
-        return format!(
-            "{}#{}: {}",
-            task.plan_file.trim_end_matches(".md"),
-            task.task_number,
-            task.description
-        );
+        return task.description.clone();
     }
     "—".to_string()
 }
