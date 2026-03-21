@@ -14,6 +14,7 @@ pub struct Assessment {
     pub monetization: u8,
     pub cloneability: Option<u8>,
     pub uniqueness: Option<u8>,
+    pub defensibility: Option<u8>,
     pub researched_at: String,
     pub reasoning: Option<String>,
     pub signals: Option<Vec<String>>,
@@ -48,6 +49,7 @@ pub struct RoadmapScores {
     pub monetization: Option<u8>,
     pub cloneability: Option<u8>,
     pub uniqueness: Option<u8>,
+    pub defensibility: Option<u8>,
     pub assessment_stale: bool,
 }
 
@@ -79,6 +81,7 @@ pub fn extract_scores(roadmap: &Roadmap) -> RoadmapScores {
             monetization: None,
             cloneability: None,
             uniqueness: None,
+            defensibility: None,
             assessment_stale: false,
         },
         Some(a) => {
@@ -89,6 +92,7 @@ pub fn extract_scores(roadmap: &Roadmap) -> RoadmapScores {
                 monetization: Some(a.monetization),
                 cloneability: a.cloneability,
                 uniqueness: a.uniqueness,
+                defensibility: a.defensibility,
                 assessment_stale: stale,
             }
         }
@@ -126,6 +130,7 @@ pub fn patch_assessment_scores(
     monetization: u8,
     cloneability: Option<u8>,
     uniqueness: Option<u8>,
+    defensibility: Option<u8>,
 ) -> Result<(), String> {
     let yaml_path = project_path.join("docs").join("roadmap.yaml");
     let content = std::fs::read_to_string(&yaml_path)
@@ -136,6 +141,7 @@ pub fn patch_assessment_scores(
     let mut in_assessment = false;
     let mut found_uniqueness = false;
     let mut found_cloneability = false;
+    let mut found_defensibility = false;
     let mut found_researched_at = false;
     let mut last_score_idx: usize = 0;
 
@@ -180,6 +186,16 @@ pub fn patch_assessment_scores(
                 last_score_idx = out.len() - 1;
                 continue;
             }
+            if line.starts_with("  defensibility:") {
+                found_defensibility = true;
+                if let Some(d) = defensibility {
+                    out.push(format!("  defensibility: {}", d));
+                } else {
+                    out.push(line.to_string());
+                }
+                last_score_idx = out.len() - 1;
+                continue;
+            }
             if line.starts_with("  researched_at:") {
                 // Insert any missing score fields before researched_at
                 if !found_uniqueness {
@@ -194,6 +210,13 @@ pub fn patch_assessment_scores(
                         out.push(format!("  cloneability: {}", c));
                         last_score_idx = out.len() - 1;
                         found_cloneability = true;
+                    }
+                }
+                if !found_defensibility {
+                    if let Some(d) = defensibility {
+                        out.push(format!("  defensibility: {}", d));
+                        last_score_idx = out.len() - 1;
+                        found_defensibility = true;
                     }
                 }
                 out.push(format!("  researched_at: \"{}\"", today));
@@ -215,6 +238,12 @@ pub fn patch_assessment_scores(
         if !found_cloneability {
             if let Some(c) = cloneability {
                 out.insert(last_score_idx + 1, format!("  cloneability: {}", c));
+                last_score_idx += 1;
+            }
+        }
+        if !found_defensibility {
+            if let Some(d) = defensibility {
+                out.insert(last_score_idx + 1, format!("  defensibility: {}", d));
                 last_score_idx += 1;
             }
         }
@@ -409,7 +438,7 @@ phases:
         let yaml = "project: test\nassessment:\n  impact: 7\n  monetization: 7\n  cloneability: 6\n  researched_at: \"2026-02-18\"\n  reasoning: |\n    Old reasoning.\n  signals:\n    - \"old signal\"\nphases: []\n";
         std::fs::write(docs.join("roadmap.yaml"), yaml).unwrap();
 
-        patch_assessment_scores(tmp.path(), 6, 4, Some(3), Some(8)).unwrap();
+        patch_assessment_scores(tmp.path(), 6, 4, Some(3), Some(8), None).unwrap();
 
         let result = std::fs::read_to_string(docs.join("roadmap.yaml")).unwrap();
         assert!(result.contains("  impact: 6"), "impact not updated");
@@ -432,7 +461,7 @@ phases:
         let yaml = "project: test\nassessment:\n  impact: 7\n  monetization: 7\n  cloneability: 6\n  researched_at: \"2026-02-18\"\nphases: []\n";
         std::fs::write(docs.join("roadmap.yaml"), yaml).unwrap();
 
-        patch_assessment_scores(tmp.path(), 7, 7, Some(6), Some(8)).unwrap();
+        patch_assessment_scores(tmp.path(), 7, 7, Some(6), Some(8), None).unwrap();
 
         let result = std::fs::read_to_string(docs.join("roadmap.yaml")).unwrap();
         let u_pos = result.find("  uniqueness: 8").expect("uniqueness missing");

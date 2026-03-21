@@ -64,6 +64,8 @@ impl Store {
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN research_consecutive_flags INTEGER NOT NULL DEFAULT 0", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN inbox_note TEXT", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN uniqueness INTEGER", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN defensibility INTEGER", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN project_type TEXT NOT NULL DEFAULT 'product'", []);
         Ok(())
     }
 
@@ -78,7 +80,7 @@ impl Store {
 
     pub fn get_project(&self, id: i64) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE id = ?1",
         )?;
 
@@ -91,7 +93,7 @@ impl Store {
 
     pub fn list_active_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE state = 'active' AND deleted_at IS NULL AND duplicate_of IS NULL ORDER BY name",
         )?;
 
@@ -105,7 +107,7 @@ impl Store {
 
     pub fn list_inbox_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE state = 'inbox' AND deleted_at IS NULL AND duplicate_of IS NULL ORDER BY created_at DESC",
         )?;
 
@@ -119,7 +121,7 @@ impl Store {
 
     pub fn list_linked_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE path IS NOT NULL AND state = 'active' AND deleted_at IS NULL AND duplicate_of IS NULL ORDER BY name",
         )?;
 
@@ -133,7 +135,7 @@ impl Store {
 
     pub fn get_project_by_path(&self, path: &str) -> Result<Option<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE path = ?1 AND deleted_at IS NULL",
         )?;
 
@@ -151,8 +153,8 @@ impl Store {
 
         let today = chrono::Local::now().date_naive().to_string();
         self.conn.execute(
-            "INSERT INTO projects (name, state, impact, monetization, readiness, last_activity, created_at, path)
-             VALUES (?1, 'inbox', 5, 5, 0, ?2, ?2, ?3)",
+            "INSERT INTO projects (name, state, impact, monetization, readiness, last_activity, created_at, path, project_type)
+             VALUES (?1, 'inbox', 5, 5, 0, ?2, ?2, ?3, 'product')",
             params![name, today, path],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -226,7 +228,7 @@ impl Store {
 
     pub fn list_possible_duplicates(&self, min_score: f32) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE deleted_at IS NULL AND duplicate_of IS NULL AND possible_duplicate_score >= ?1
              ORDER BY possible_duplicate_score DESC, name",
         )?;
@@ -304,6 +306,11 @@ impl Store {
         let possible_duplicate_score: Option<f32> = row.get(12)?;
         let cloneability: Option<u8> = row.get(13)?;
         let uniqueness: Option<u8> = row.get(14)?;
+        let defensibility: Option<u8> = row.get::<_, Option<u8>>(15).unwrap_or(None);
+        let project_type = {
+            let type_str: String = row.get::<_, Option<String>>(16).unwrap_or(None).unwrap_or_else(|| "product".to_string());
+            crate::domain::ProjectType::from_str(&type_str)
+        };
 
         Ok(Project {
             id: row.get(0)?,
@@ -323,6 +330,8 @@ impl Store {
             possible_duplicate_score,
             cloneability,
             uniqueness,
+            defensibility,
+            project_type,
         })
     }
 
@@ -339,6 +348,20 @@ impl Store {
             params![impact, monetization, cloneability, uniqueness, id],
         )?;
         Ok(count)
+    }
+
+    pub fn update_defensibility(&self, id: i64, defensibility: Option<u8>) -> Result<usize> {
+        self.conn.execute(
+            "UPDATE projects SET defensibility = ?1 WHERE id = ?2",
+            params![defensibility, id],
+        )
+    }
+
+    pub fn update_project_type(&self, id: i64, project_type: &crate::domain::ProjectType) -> Result<usize> {
+        self.conn.execute(
+            "UPDATE projects SET project_type = ?1 WHERE id = ?2",
+            params![project_type.as_str(), id],
+        )
     }
 
     pub fn soft_delete(&self, id: i64) -> Result<usize> {
@@ -360,7 +383,7 @@ impl Store {
 
     pub fn list_deleted_projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
         )?;
 
@@ -374,7 +397,7 @@ impl Store {
 
     pub fn list_projects_for_dedupe(&self) -> Result<Vec<Project>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness
+            "SELECT id, name, state, impact, monetization, readiness, last_activity, created_at, soft_deadline, path, deleted_at, duplicate_of, possible_duplicate_score, cloneability, uniqueness, defensibility, project_type
              FROM projects WHERE deleted_at IS NULL AND duplicate_of IS NULL",
         )?;
 

@@ -45,11 +45,10 @@ fn test_status_hides_naming_suggestions_and_shows_table() {
     cmd.arg("status");
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("ID  S  Project"))
+        .stdout(predicate::str::contains("ID  S  T  Project"))
         .stdout(predicate::str::contains("Next"))
         .stdout(predicate::str::contains("Naming suggestions").not())
-        .stdout(predicate::str::contains("Uniq"))
-        .stdout(predicate::str::contains("Clone"))
+        .stdout(predicate::str::contains("Def"))
         .stdout(predicate::str::contains("impact:").not())
         .stdout(predicate::str::contains("(run 'pm research").not());
 }
@@ -73,6 +72,6 @@ fn test_status_accepts_sort_flag() {
     cmd.args(["status", "--sort", "name"]);
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("ID  S  Project"))
+        .stdout(predicate::str::contains("ID  S  T  Project"))
         .stdout(predicate::str::contains("Next"));
 }

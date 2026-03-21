@@ -88,28 +88,45 @@ pub fn detect_cut_losses(text: &str) -> bool {
     lower.contains("consider stopping") || lower.contains("cut losses")
 }
 
-/// Parse IMPACT/MONETISATION/UNIQUENESS/CLONEABILITY scores from LLM output.
-/// Returns (impact, monetisation, uniqueness, cloneability) — each None if absent or unparseable.
-pub fn parse_axis_scores(output: &str) -> (Option<u8>, Option<u8>, Option<u8>, Option<u8>) {
-    let mut impact = None;
-    let mut monetisation = None;
-    let mut uniqueness = None;
-    let mut cloneability = None;
+#[derive(Debug, Clone, Default)]
+pub struct AxisScores {
+    pub impact: Option<u8>,
+    pub monetisation: Option<u8>,
+    pub defensibility: Option<u8>,
+    pub uniqueness: Option<u8>,
+    pub cloneability: Option<u8>,
+}
+
+impl AxisScores {
+    pub fn any_present(&self) -> bool {
+        self.impact.is_some() || self.monetisation.is_some() || self.defensibility.is_some()
+            || self.uniqueness.is_some() || self.cloneability.is_some()
+    }
+}
+
+pub fn parse_axis_scores(output: &str) -> AxisScores {
+    let mut scores = AxisScores::default();
 
     for line in output.lines() {
         let line = line.trim();
         if let Some(v) = line.strip_prefix("IMPACT:") {
-            impact = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+            scores.impact = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
         } else if let Some(v) = line.strip_prefix("MONETISATION:") {
-            monetisation = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+            scores.monetisation = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+        } else if let Some(v) = line.strip_prefix("DEFENSIBILITY:") {
+            scores.defensibility = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
         } else if let Some(v) = line.strip_prefix("UNIQUENESS:") {
-            uniqueness = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+            scores.uniqueness = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
         } else if let Some(v) = line.strip_prefix("CLONEABILITY:") {
-            cloneability = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
+            scores.cloneability = v.trim().parse::<u8>().ok().filter(|&n| n >= 1 && n <= 10);
         }
     }
 
-    (impact, monetisation, uniqueness, cloneability)
+    if scores.defensibility.is_none() && (scores.uniqueness.is_some() || scores.cloneability.is_some()) {
+        scores.defensibility = Some(scores.uniqueness.unwrap_or(0).max(scores.cloneability.unwrap_or(0)));
+    }
+
+    scores
 }
 
 /// Run competitive research via configured LLM provider chain.
@@ -156,17 +173,12 @@ MONETISATION: N
   10 = strong TAM, proven willingness to pay in adjacent markets
   Evidence: [comparable products, price points, market size]
 
-UNIQUENESS: N
-  1 = direct clone of existing products, no meaningful differentiation
-  5 = distinct in some ways but competes with established alternatives
-  10 = genuine Blue Ocean — solves the problem in a way nothing else does
-  Evidence: [name 2-3 closest competitors and how this differs]
-
-CLONEABILITY: N
-  1 = anyone could replicate this in a weekend
-  5 = requires significant domain expertise or integration work
-  10 = near-impossible to replicate (proprietary data, network effects, ecosystem lock-in)
-  Evidence: [what creates the moat — data, network, switching cost, or brand]"#,
+DEFENSIBILITY: N
+  How hard is it to replicate this project's value, considering both differentiation and moat?
+  1 = commodity clone, anyone could replicate this in a weekend
+  5 = differentiated, requires significant domain expertise or integration work
+  10 = proprietary data/network effects, near-impossible to replicate
+  Evidence: [name 2-3 closest competitors, how this differs, what creates the moat]"#,
         name = project_name,
         usp = usp,
     );
@@ -196,17 +208,13 @@ MONETISATION: N
   5 = clear model but uncertain willingness to pay
   10 = strong TAM, proven willingness to pay in adjacent markets
 
-UNIQUENESS: N
-  1 = direct clone of existing products, no meaningful differentiation
-  5 = distinct in some ways but competes with established alternatives
-  10 = genuine Blue Ocean — solves the problem in a way nothing else does
+DEFENSIBILITY: N
+  How hard is it to replicate this project's value, considering both differentiation and moat?
+  1 = commodity clone, anyone could replicate this in a weekend
+  5 = differentiated, requires significant domain expertise or integration work
+  10 = proprietary data/network effects, near-impossible to replicate
 
-CLONEABILITY: N
-  1 = anyone could replicate this in a weekend
-  5 = requires significant domain expertise or integration work
-  10 = near-impossible to replicate (proprietary data, network effects, ecosystem lock-in)
-
-Output only the four lines above with N replaced by your score. No other text."#,
+Output only the three lines above with N replaced by your score. No other text."#,
         name = project_name,
         summary = summary,
     );
@@ -527,6 +535,35 @@ fn run_command_with_timeout(command: &mut Command, timeout: Duration) -> Result<
             Err(e) => return Err(format!("Failed waiting on command: {}", e)),
         }
     }
+}
+
+pub fn validate_scores(
+    scores: &AxisScores,
+    project_type: &crate::domain::ProjectType,
+    project_age_days: i64,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if matches!(project_type, crate::domain::ProjectType::Study | crate::domain::ProjectType::Library) {
+        if let Some(m) = scores.monetisation {
+            if m > 3 {
+                warnings.push(format!(
+                    "Monetisation scored {} for a {} project, which may be inflated.",
+                    m, project_type.as_str()
+                ));
+            }
+        }
+    }
+    if project_age_days < 30 {
+        if let Some(d) = scores.defensibility {
+            if d > 7 {
+                warnings.push(format!(
+                    "Defensibility scored {} for a project less than 30 days old. New projects rarely have strong moats.",
+                    d
+                ));
+            }
+        }
+    }
+    warnings
 }
 
 /// Parse the VERDICT/RATIONALE response from LLM verify output.
@@ -877,23 +914,55 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_axis_scores_extracts_all_four() {
+    fn test_parse_axis_scores_extracts_all() {
+        let output = "IMPACT: 8\nMONETISATION: 7\nDEFENSIBILITY: 9\nsome other text";
+        let scores = parse_axis_scores(output);
+        assert_eq!(scores.impact, Some(8));
+        assert_eq!(scores.monetisation, Some(7));
+        assert_eq!(scores.defensibility, Some(9));
+    }
+
+    #[test]
+    fn test_parse_axis_scores_legacy_uniqueness_cloneability() {
         let output = "IMPACT: 8\nMONETISATION: 7\nUNIQUENESS: 6\nCLONEABILITY: 9\nsome other text";
         let scores = parse_axis_scores(output);
-        assert_eq!(scores.0, Some(8));
-        assert_eq!(scores.1, Some(7));
-        assert_eq!(scores.2, Some(6));
-        assert_eq!(scores.3, Some(9));
+        assert_eq!(scores.impact, Some(8));
+        assert_eq!(scores.monetisation, Some(7));
+        assert_eq!(scores.uniqueness, Some(6));
+        assert_eq!(scores.cloneability, Some(9));
+        assert_eq!(scores.defensibility, Some(9));
     }
 
     #[test]
     fn test_parse_axis_scores_returns_none_for_missing() {
         let output = "IMPACT: 7\nsome other text";
         let scores = parse_axis_scores(output);
-        assert_eq!(scores.0, Some(7));
-        assert_eq!(scores.1, None);
-        assert_eq!(scores.2, None);
-        assert_eq!(scores.3, None);
+        assert_eq!(scores.impact, Some(7));
+        assert_eq!(scores.monetisation, None);
+        assert_eq!(scores.defensibility, None);
+    }
+
+    #[test]
+    fn test_validate_scores_warns_monetisation_for_study() {
+        let scores = AxisScores { monetisation: Some(7), ..Default::default() };
+        let warnings = validate_scores(&scores, &crate::domain::ProjectType::Study, 100);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Monetisation"));
+    }
+
+    #[test]
+    fn test_validate_scores_ok_for_product() {
+        let scores = AxisScores { monetisation: Some(7), ..Default::default() };
+        let warnings = validate_scores(&scores, &crate::domain::ProjectType::Product, 100);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_validate_scores_warns_defensibility_for_young_project() {
+        let scores = AxisScores { defensibility: Some(9), ..Default::default() };
+        let warnings = validate_scores(&scores, &crate::domain::ProjectType::Product, 10);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Defensibility"));
     }
 
     #[test]
