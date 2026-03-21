@@ -9,8 +9,8 @@ fn inbox_shows_possible_duplicates() {
     let db_path = dir.path().join("pm.db");
     let store = Store::open(&db_path).unwrap();
 
-    let _a = store.add_project("Accent Game").unwrap();
-    let b = store.add_project("accent_game").unwrap();
+    let _a = store.add_project("Budget Tracker").unwrap();
+    let b = store.add_project("budget_tracker").unwrap();
     store.mark_possible_duplicate(b, 0.85).unwrap();
 
     let mut cmd = cargo_bin_cmd!("pm");

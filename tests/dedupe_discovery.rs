@@ -6,11 +6,11 @@ use tempfile::TempDir;
 #[test]
 fn discovery_marks_duplicate() {
     let root = TempDir::new().unwrap();
-    let repo = root.path().join("accent_game");
+    let repo = root.path().join("budget_tracker");
     fs::create_dir_all(repo.join(".git")).unwrap();
 
     let store = Store::open_in_memory().unwrap();
-    let existing = store.add_project("Accent Game").unwrap();
+    let existing = store.add_project("Budget Tracker").unwrap();
 
     discover_projects(&store, root.path()).unwrap();
 

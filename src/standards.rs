@@ -2,8 +2,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_CONFIG_PATH: &str = "/home/markw/projects/pm-standards.yml";
-pub const DEFAULT_REPORT_PATH: &str = "/home/markw/projects/.pm-standards-report.json";
+pub fn default_config_path() -> PathBuf {
+    dirs::config_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("pm")
+        .join("standards.yml")
+}
+
+pub fn default_report_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("pm")
+        .join("standards-report.json")
+}
 
 #[derive(Debug, Deserialize)]
 pub struct StandardsConfig {
@@ -63,8 +74,9 @@ impl StandardsConfig {
 
     pub fn load() -> Result<Self, StandardsError> {
         let path = std::env::var("PM_STANDARDS_CONFIG")
-            .unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
-        load_from_path(Path::new(&path))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| default_config_path());
+        load_from_path(&path)
     }
 }
 

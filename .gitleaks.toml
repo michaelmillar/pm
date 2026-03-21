@@ -1,0 +1,14 @@
+title = "gitleaks config"
+
+[extend]
+# Uses the default gitleaks rules (API keys, tokens, passwords, etc.)
+# See https://github.com/gitleaks/gitleaks
+
+[allowlist]
+description = "project-specific allowlist"
+paths = [
+    '''(^|/)vendor/''',
+    '''(^|/)node_modules/''',
+    '''(^|/)target/''',
+    '''\.lock$''',
+]

@@ -155,7 +155,7 @@ pub fn parse_dod(content: &str) -> Result<DodFile, String> {
     }
 
     for line in content.lines() {
-        // Project name from H1: "# patchwaste — Definition of Done"
+        // Project name from H1: "# ProjectName — Definition of Done"
         if project_name.is_empty() && line.starts_with("# ") {
             let title = &line[2..];
             project_name = if let Some(pos) = title.find(" — ") {
@@ -491,66 +491,66 @@ mod tests {
 
     #[test]
     fn test_parse_dod_full() {
-        let content = r#"# patchwaste — Definition of Done
+        let content = r#"# acme-widget — Definition of Done
 
 ## USP
-CI check that integrates into a Steam game dev's workflow.
+Dashboard that surfaces key metrics for widget analytics.
 
 ---
 
-## [C1] CI binary exits non-zero on high-impact changes
+## [C1] CLI exits non-zero on invalid input
 
 **Evidence:** `tests/integration/ci_exit_codes.rs`
 
 **Scenario:**
-Given a Steam game repo
-When the patchwaste CI check runs
+Given an input file with errors
+When the acme-widget check runs
 Then it exits non-zero
 
 **Automated:** pending
 **Human:** pending
 "#;
         let dod = parse_dod(content).unwrap();
-        assert_eq!(dod.project_name, "patchwaste");
+        assert_eq!(dod.project_name, "acme-widget");
         assert_eq!(dod.criteria.len(), 1);
         let c = &dod.criteria[0];
         assert_eq!(c.id, "C1");
-        assert_eq!(c.description, "CI binary exits non-zero on high-impact changes");
+        assert_eq!(c.description, "CLI exits non-zero on invalid input");
         assert!(c.evidence.is_some());
-        assert!(c.scenario.contains("Given a Steam game repo"));
+        assert!(c.scenario.contains("Given an input file with errors"));
         assert_eq!(c.automated, CriterionStatus::Pending);
         assert_eq!(c.human, CriterionStatus::Pending);
     }
 
     #[test]
     fn test_parse_dod_with_pass_status_and_rationale() {
-        let content = r#"# wonk — Definition of Done
+        let content = r#"# taskflow — Definition of Done
 
 ## USP
-UK political simulator.
+Task automation for distributed teams.
 
 ---
 
-## [C1] Player can win an election
+## [C1] User can create a workflow
 
-**Evidence:** `src/game/election.rs`
+**Evidence:** `src/workflow/engine.rs`
 
 **Scenario:**
-Given the player has high approval
-When they call an election
-Then they win
+Given the user has a valid config
+When they submit a new workflow
+Then it is created successfully
 
 **Automated:** pass — 2026-02-19
-> Confirmed in election_win_test.
+> Confirmed in workflow_create_test.
 **Human:** fail — 2026-02-19
-> Felt unfair as a player.
+> UI felt confusing on first use.
 "#;
         let dod = parse_dod(content).unwrap();
         let c = &dod.criteria[0];
         assert_eq!(c.automated.label(), "pass");
         assert_eq!(c.human.label(), "fail");
         if let CriterionStatus::Pass { rationale, .. } = &c.automated {
-            assert!(rationale.as_deref().unwrap_or("").contains("Confirmed"));
+            assert!(rationale.as_deref().unwrap_or("").contains("workflow_create_test"));
         }
     }
 
@@ -597,19 +597,19 @@ Then C
 
     #[test]
     fn test_write_dod_round_trip() {
-        let content = r#"# patchwaste — Definition of Done
+        let content = r#"# acme-widget — Definition of Done
 
 ## USP
-CI check for Steam devs.
+Dashboard for widget analytics.
 
 ---
 
-## [C1] CI exits non-zero on high-impact changes
+## [C1] CLI exits non-zero on invalid input
 
 **Evidence:** `tests/integration/ci_exit_codes.rs`
 
 **Scenario:**
-Given a Steam game repo
+Given an input file with errors
 When the check runs
 Then it exits non-zero
 
@@ -684,7 +684,7 @@ Then it exits non-zero
         use tempfile::TempDir;
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
-        let result = generate_dod(tmp.path(), "patchwaste", None, false).unwrap();
+        let result = generate_dod(tmp.path(), "acme-widget", None, false).unwrap();
         assert_eq!(result, DodAction::Created);
         assert!(tmp.path().join("docs").join("DOD.md").exists());
     }
@@ -694,8 +694,8 @@ Then it exits non-zero
         use tempfile::TempDir;
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
-        generate_dod(tmp.path(), "patchwaste", None, false).unwrap();
-        let result = generate_dod(tmp.path(), "patchwaste", None, false).unwrap();
+        generate_dod(tmp.path(), "acme-widget", None, false).unwrap();
+        let result = generate_dod(tmp.path(), "acme-widget", None, false).unwrap();
         assert_eq!(result, DodAction::AlreadyExists);
     }
 

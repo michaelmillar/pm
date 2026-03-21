@@ -5,7 +5,7 @@
 Always reinstall the binary so the live `pm` command reflects the changes:
 
 ```bash
-cargo install --path /home/markw/projects/pm
+cargo install --path .
 ```
 
 This is required at the end of every implementation session. Add it as the final step before finishing a development branch.
