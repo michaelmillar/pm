@@ -4,6 +4,7 @@
   import Inbox from "./views/Inbox.svelte";
   import Next from "./views/Next.svelte";
   import Parked from "./views/Parked.svelte";
+  import Pipeline from "./views/Pipeline.svelte";
 
   let hash = $state(window.location.hash || "#/");
 
@@ -29,6 +30,7 @@
     <h1>pm</h1>
     <nav>
       <a href="#/" class={navClass("/")}>Dashboard</a>
+      <a href="#/pipeline" class={navClass("/pipeline")}>Pipeline</a>
       <a href="#/inbox" class={navClass("/inbox")}>Inbox</a>
       <a href="#/parked" class={navClass("/parked")}>Parked</a>
       <a href="#/next" class={navClass("/next")}>Next</a>
@@ -39,6 +41,8 @@
     <Dashboard />
   {:else if route.startsWith("/project/")}
     <ProjectDetail id={parseInt(route.slice(9))} />
+  {:else if route === "/pipeline"}
+    <Pipeline />
   {:else if route === "/inbox"}
     <Inbox />
   {:else if route === "/parked"}
