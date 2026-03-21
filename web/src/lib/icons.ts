@@ -1,21 +1,27 @@
-// Deterministic project icon system.
-// Each project gets a stable colour derived from its name and a two-letter monogram.
+const EMOJI_MAP: Record<string, string> = {
+  "pm": "\u{1F4CB}",
+  "patchwaste": "\u{1F6E0}",
+  "patchwaste-cloud": "\u{2601}",
+  "utter": "\u{1F3A4}",
+  "wonk": "\u{1F3DB}",
+  "tribe": "\u{1F3AE}",
+  "va-game": "\u{1F441}",
+  "blog": "\u{270D}",
+  "vigil": "\u{1F6E1}",
+  "squint": "\u{1F453}",
+  "hazptr": "\u{1F9F2}",
+  "from-zero-to-systems": "\u{1F4DA}",
+  "mle-foundations-forge": "\u{1F9E0}",
+  "biosig-techsig-lab": "\u{1F52C}",
+  "scotland-buyer-offer": "\u{1F3E0}",
+  "political_consumerism": "\u{1F6D2}",
+  "divest": "\u{1F4B0}",
+};
 
 const PALETTE = [
-  "#1e3a5f", // navy
-  "#2c8a57", // forest
-  "#8b5cf6", // violet
-  "#b45309", // amber
-  "#0f766e", // teal
-  "#be185d", // rose
-  "#4338ca", // indigo
-  "#0369a1", // sky
-  "#7c3aed", // purple
-  "#c2410c", // burnt orange
-  "#047857", // emerald
-  "#a21caf", // fuchsia
-  "#1d4ed8", // blue
-  "#b91c1c", // red
+  "#1e3a5f", "#2c8a57", "#8b5cf6", "#b45309", "#0f766e",
+  "#be185d", "#4338ca", "#0369a1", "#7c3aed", "#c2410c",
+  "#047857", "#a21caf", "#1d4ed8", "#b91c1c",
 ];
 
 function hashName(name: string): number {
@@ -30,6 +36,11 @@ export function projectColour(name: string): string {
   return PALETTE[hashName(name) % PALETTE.length];
 }
 
+export function projectEmoji(name: string): string | null {
+  const key = name.toLowerCase().replace(/\s+/g, "-");
+  return EMOJI_MAP[key] ?? null;
+}
+
 export function projectMonogram(name: string): string {
   const parts = name.split(/[-_ ]+/).filter(Boolean);
   if (parts.length >= 2) {
@@ -40,19 +51,21 @@ export function projectMonogram(name: string): string {
 
 export function projectIconSvg(name: string, size = 28): string {
   const colour = projectColour(name);
-  const mono = projectMonogram(name);
+  const emoji = projectEmoji(name);
   const fontSize = Math.round(size * 0.42);
   const textY = Math.round(size * 0.62);
   const r = Math.round(size / 2);
+  const content = emoji
+    ? `<text x="${r}" y="${Math.round(size * 0.72)}" font-size="${Math.round(size * 0.55)}" text-anchor="middle">${emoji}</text>`
+    : `<text x="${r}" y="${textY}" font-family="system-ui,-apple-system,sans-serif" font-size="${fontSize}" font-weight="600" fill="#fff" text-anchor="middle">${projectMonogram(name)}</text>`;
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`,
-    `<rect width="${size}" height="${size}" rx="${Math.round(size * 0.22)}" fill="${colour}"/>`,
-    `<text x="${r}" y="${textY}" font-family="system-ui,-apple-system,sans-serif" font-size="${fontSize}" font-weight="600" fill="#fff" text-anchor="middle">${mono}</text>`,
+    emoji ? "" : `<rect width="${size}" height="${size}" rx="${Math.round(size * 0.22)}" fill="${colour}"/>`,
+    content,
     `</svg>`,
   ].join("");
 }
 
-// Pre-built data URI for use in <img> tags
 export function projectIconDataUri(name: string, size = 28): string {
   return `data:image/svg+xml,${encodeURIComponent(projectIconSvg(name, size))}`;
 }

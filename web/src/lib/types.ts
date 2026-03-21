@@ -17,6 +17,8 @@ export interface Project {
   soft_deadline: string | null;
   path: string | null;
   next_milestone: string | null;
+  milestone_target: string | null;
+  usp: string | null;
 }
 
 export interface ProjectDetail extends Project {
