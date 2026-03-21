@@ -320,6 +320,13 @@ pub fn generate_dod(path: &Path, name: &str, usp: Option<String>, force: bool) -
 }
 
 pub fn extract_usp_from_charter(path: &Path) -> Option<String> {
+    if let Some(usp) = extract_usp_from_charter_file(path) {
+        return Some(usp);
+    }
+    extract_usp_from_readme(path)
+}
+
+fn extract_usp_from_charter_file(path: &Path) -> Option<String> {
     let charter_path = path.join("docs").join("CHARTER.md");
     let content = std::fs::read_to_string(charter_path).ok()?;
 
@@ -349,6 +356,29 @@ pub fn extract_usp_from_charter(path: &Path) -> Option<String> {
     } else {
         Some(lines.join(" ").trim().to_string())
     }
+}
+
+fn extract_usp_from_readme(path: &Path) -> Option<String> {
+    let readme_path = path.join("README.md");
+    let content = std::fs::read_to_string(readme_path).ok()?;
+    let mut lines = content.lines().peekable();
+
+    while let Some(line) = lines.next() {
+        if line.starts_with("# ") {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('[') || trimmed.starts_with('<') || trimmed.starts_with("![") {
+            continue;
+        }
+        if trimmed.starts_with("## ") || trimmed.starts_with("```") {
+            break;
+        }
+        if trimmed.len() > 15 {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
 }
 
 pub fn load_dod(path: &Path) -> Option<DodFile> {

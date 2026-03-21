@@ -213,14 +213,7 @@ fn compute_next_milestone(p: &crate::domain::Project) -> Option<String> {
             .cmp(&b.plan_file)
             .then_with(|| a.task_number.cmp(&b.task_number))
     });
-    pending.first().map(|t| {
-        format!(
-            "{}#{}: {}",
-            t.plan_file.trim_end_matches(".md"),
-            t.task_number,
-            t.description
-        )
-    })
+    pending.first().map(|t| t.description.clone())
 }
 
 fn roadmap_to_api(rm: &roadmap::Roadmap) -> ApiRoadmap {

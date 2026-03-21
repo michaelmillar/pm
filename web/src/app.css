@@ -171,10 +171,7 @@ td.name-cell {
   font-weight: 400;
   font-size: 0.72rem;
   color: var(--ink-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 280px;
+  line-height: 1.3;
 }
 
 /* readiness bar */
