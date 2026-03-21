@@ -543,7 +543,7 @@ pub fn validate_scores(
     project_age_days: i64,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
-    if matches!(project_type, crate::domain::ProjectType::Study | crate::domain::ProjectType::Library) {
+    if matches!(project_type, crate::domain::ProjectType::Study | crate::domain::ProjectType::Library | crate::domain::ProjectType::Blog) {
         if let Some(m) = scores.monetisation {
             if m > 3 {
                 warnings.push(format!(

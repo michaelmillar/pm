@@ -217,8 +217,12 @@ enum Commands {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum CliProjectType {
     Product,
+    Game,
+    Webapp,
+    OpenCore,
     Study,
     Library,
+    Blog,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -281,8 +285,12 @@ pub fn run() {
 fn cmd_type(store: &Store, id: i64, project_type: CliProjectType) {
     let pt = match project_type {
         CliProjectType::Product => crate::domain::ProjectType::Product,
+        CliProjectType::Game => crate::domain::ProjectType::Game,
+        CliProjectType::Webapp => crate::domain::ProjectType::Webapp,
+        CliProjectType::OpenCore => crate::domain::ProjectType::OpenCore,
         CliProjectType::Study => crate::domain::ProjectType::Study,
         CliProjectType::Library => crate::domain::ProjectType::Library,
+        CliProjectType::Blog => crate::domain::ProjectType::Blog,
     };
     let count = store.update_project_type(id, &pt).unwrap();
     if count == 0 {

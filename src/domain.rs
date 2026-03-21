@@ -1,15 +1,23 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectType {
     Product,
+    Game,
+    Webapp,
+    OpenCore,
     Study,
     Library,
+    Blog,
 }
 
 impl ProjectType {
     pub fn from_str(s: &str) -> Self {
         match s {
+            "game" => ProjectType::Game,
+            "webapp" => ProjectType::Webapp,
+            "open-core" => ProjectType::OpenCore,
             "study" => ProjectType::Study,
             "library" => ProjectType::Library,
+            "blog" => ProjectType::Blog,
             _ => ProjectType::Product,
         }
     }
@@ -17,16 +25,36 @@ impl ProjectType {
     pub fn as_str(&self) -> &'static str {
         match self {
             ProjectType::Product => "product",
+            ProjectType::Game => "game",
+            ProjectType::Webapp => "webapp",
+            ProjectType::OpenCore => "open-core",
             ProjectType::Study => "study",
             ProjectType::Library => "library",
+            ProjectType::Blog => "blog",
         }
     }
 
     pub fn short(&self) -> &'static str {
         match self {
             ProjectType::Product => "P",
+            ProjectType::Game => "G",
+            ProjectType::Webapp => "W",
+            ProjectType::OpenCore => "OC",
             ProjectType::Study => "S",
             ProjectType::Library => "L",
+            ProjectType::Blog => "B",
+        }
+    }
+
+    pub fn weights(&self) -> (i32, i32, i32) {
+        match self {
+            ProjectType::Product => (3, 2, 2),
+            ProjectType::Game =>    (3, 2, 3),
+            ProjectType::Webapp =>  (3, 2, 2),
+            ProjectType::OpenCore =>(3, 1, 3),
+            ProjectType::Study =>   (3, 0, 0),
+            ProjectType::Library => (3, 0, 2),
+            ProjectType::Blog =>    (2, 0, 0),
         }
     }
 }
@@ -114,15 +142,11 @@ impl Project {
     pub fn priority_score(&self, today: chrono::NaiveDate) -> i32 {
         let staleness_days = (today - self.last_activity).num_days() as i32;
         let staleness_penalty = staleness_days.min(30);
+        let (impact_w, monet_w, def_w) = self.project_type.weights();
 
-        let monet_weight = match self.project_type {
-            ProjectType::Product => 2,
-            ProjectType::Study | ProjectType::Library => 0,
-        };
-
-        (self.effective_impact() as i32 * 3)
-            + (self.monetization as i32 * monet_weight)
-            + (self.effective_defensibility() as i32 * 2)
+        (self.effective_impact() as i32 * impact_w)
+            + (self.monetization as i32 * monet_w)
+            + (self.effective_defensibility() as i32 * def_w)
             + (self.readiness as i32 / 10 * 4)
             - staleness_penalty
     }
