@@ -59,6 +59,7 @@ pub struct Project {
     pub uniqueness: Option<u8>,
     pub defensibility: Option<u8>,
     pub project_type: ProjectType,
+    pub vibe: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +100,17 @@ impl Project {
         }
     }
 
+    /// Effective impact: blends research impact with personal vibe.
+    /// If both set, averages them. If only one, uses that. Default 5.
+    pub fn effective_impact(&self) -> u8 {
+        match (self.impact, self.vibe) {
+            (i, Some(v)) if i != 5 => ((i as u16 + v as u16 + 1) / 2) as u8,
+            (i, None) if i != 5 => i,
+            (_, Some(v)) => v,
+            _ => 5,
+        }
+    }
+
     pub fn priority_score(&self, today: chrono::NaiveDate) -> i32 {
         let staleness_days = (today - self.last_activity).num_days() as i32;
         let staleness_penalty = staleness_days.min(30);
@@ -108,7 +120,7 @@ impl Project {
             ProjectType::Study | ProjectType::Library => 0,
         };
 
-        (self.impact as i32 * 3)
+        (self.effective_impact() as i32 * 3)
             + (self.monetization as i32 * monet_weight)
             + (self.effective_defensibility() as i32 * 2)
             + (self.readiness as i32 / 10 * 4)
@@ -141,6 +153,7 @@ mod tests {
             cloneability: None,
             defensibility: None,
             project_type: ProjectType::Product,
+            vibe: None,
         }
     }
 
@@ -191,6 +204,7 @@ mod tests {
             cloneability: None,
             defensibility,
             project_type: ProjectType::Product,
+            vibe: None,
         }
     }
 

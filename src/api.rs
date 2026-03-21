@@ -35,6 +35,7 @@ pub struct ApiProject {
     pub soft_deadline: Option<String>,
     pub path: Option<String>,
     pub project_type: String,
+    pub vibe: Option<u8>,
     pub next_milestone: Option<String>,
     pub milestone_target: Option<String>,
 }
@@ -166,6 +167,7 @@ fn project_to_api(p: &crate::domain::Project) -> ApiProject {
         created_at: proj.created_at.to_string(),
         soft_deadline: proj.soft_deadline.map(|d| d.to_string()),
         project_type: proj.project_type.as_str().to_string(),
+        vibe: proj.vibe,
         path: proj.path.clone(),
         next_milestone: compute_next_milestone(p),
         milestone_target,

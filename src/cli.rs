@@ -199,6 +199,13 @@ enum Commands {
         #[arg(value_enum)]
         project_type: CliProjectType,
     },
+    /// Set your personal excitement/conviction for a project (1-10)
+    Vibe {
+        /// Project ID
+        id: i64,
+        /// Vibe score (1-10)
+        score: u8,
+    },
     /// Start the web dashboard
     Serve {
         /// Port to listen on
@@ -266,6 +273,7 @@ pub fn run() {
         } => cmd_mark(&store, id, task_number, plan),
         Commands::Pivot { id, count, refresh } => cmd_pivot(&store, id, count, refresh),
         Commands::Type { id, project_type } => cmd_type(&store, id, project_type),
+        Commands::Vibe { id, score } => cmd_vibe(&store, id, score),
         Commands::Serve { port } => cmd_serve(store, port),
     }
 }
@@ -282,6 +290,19 @@ fn cmd_type(store: &Store, id: i64, project_type: CliProjectType) {
         return;
     }
     println!("Project {} type set to '{}'", id, pt.as_str());
+}
+
+fn cmd_vibe(store: &Store, id: i64, score: u8) {
+    if !(1..=10).contains(&score) {
+        println!("Vibe must be 1-10.");
+        return;
+    }
+    let count = store.update_vibe(id, Some(score)).unwrap();
+    if count == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
+    println!("Project {} vibe set to {}/10", id, score);
 }
 
 fn cmd_serve(store: Store, port: u16) {
@@ -970,10 +991,11 @@ fn cmd_throne(store: &Store) {
 }
 
 fn cmd_why(store: &Store) {
-    println!("Priority formula: (impact x 3) + (monetisation x 2) + (defensibility x 2) + (readiness/10 x 4) - staleness.min(30)");
+    println!("Priority formula: (effective_impact x 3) + (monetisation x 2) + (defensibility x 2) + (readiness/10 x 4) - staleness.min(30)");
+    println!("\nEffective impact blends research impact with personal vibe (average when both set).");
     println!("\nWeights grounded in:");
     println!("  readiness       x4  Cal Newport / execution-first: bottleneck is rarely the idea");
-    println!("  impact          x3  YC 'make something people want': pain severity is the primary filter");
+    println!("  eff. impact     x3  YC 'make something people want': pain severity + personal conviction");
     println!("  monetisation    x2  Lean Startup validated learning: market willingness to pay");
     println!("  defensibility   x2  Blue Ocean + Helmer 7 Powers: differentiation and moat combined");
     println!("  staleness cap 30    untouched projects lose context; hard cap prevents full exclusion");
@@ -986,7 +1008,12 @@ fn cmd_why(store: &Store) {
 
         if let Some((top, score)) = scored.first() {
             println!("\nTop pick '{}' breakdown:", top.name);
-            println!("  impact({}) x 3 = {}", top.impact, top.impact as i32 * 3);
+            let ei = top.effective_impact();
+            if let Some(v) = top.vibe {
+                println!("  impact({}) + vibe({}) = effective_impact({}) x 3 = {}", top.impact, v, ei, ei as i32 * 3);
+            } else {
+                println!("  impact({}) x 3 = {}", ei, ei as i32 * 3);
+            }
             println!("  monetisation({}) x 2 = {}", top.monetization, top.monetization as i32 * 2);
             println!("  defensibility({}) x 2 = {}", top.effective_defensibility(), top.effective_defensibility() as i32 * 2);
             println!("  readiness({}/10) x 4 = {}", top.readiness, (top.readiness as i32 / 10) * 4);
@@ -1194,6 +1221,10 @@ fn cmd_show(store: &Store, id: i64) {
     println!();
     println!("Scores:");
     println!("  Impact:         {}/10", project.impact);
+    if let Some(v) = project.vibe {
+        println!("  Vibe:           {}/10", v);
+        println!("  Eff. impact:    {}/10", project.effective_impact());
+    }
     println!("  Monetization:   {}/10", project.monetization);
     println!("  Defensibility:  {}/10", project.effective_defensibility());
     println!("  Readiness:      {}%", project.readiness);

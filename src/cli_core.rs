@@ -1,5 +1,4 @@
 use crate::domain::{ProjectState, ScanResult};
-use chrono::NaiveDate;
 use crate::store::Store;
 
 #[derive(Debug, PartialEq)]
@@ -9,41 +8,16 @@ pub enum ScoreResult {
     Invalid { field: &'static str },
 }
 
-#[derive(Debug, PartialEq)]
-pub struct AutoScore {
-    pub impact: u8,
-    pub monetization: u8,
-    pub readiness: u8,
-}
-
-pub fn auto_score(scan: &ScanResult, created_at: NaiveDate, today: NaiveDate) -> AutoScore {
-    let age_days = (today - created_at).num_days().max(0) as u32;
-    let age_boost = (age_days / 90) as i32;
-
+/// Auto-scored readiness from scan results. Impact and monetisation are NOT
+/// auto-scored: they come from LLM research or manual user input only.
+pub fn auto_readiness(scan: &ScanResult) -> u8 {
     let readiness = if scan.total_tasks == 0 {
         if scan.last_commit_date.is_some() { 20 } else { 5 }
     } else {
         let ratio = (scan.completed_tasks as f32 / scan.total_tasks as f32) * 100.0;
         ratio.round() as i32
     };
-
-    let planning = if scan.plan_files.is_empty() { 0 } else { 2 };
-    let charter = match scan.charter_filled {
-        Some((filled, total)) if total > 0 => {
-            ((filled as f32 / total as f32) * 3.0).round() as i32
-        }
-        _ => 0,
-    };
-
-    let impact = (5 + planning + charter + age_boost).clamp(1, 10) as u8;
-    let monetization = (5 + planning + age_boost).clamp(1, 10) as u8;
-    let readiness = readiness.clamp(0, 100) as u8;
-
-    AutoScore {
-        impact,
-        monetization,
-        readiness,
-    }
+    readiness.clamp(0, 100) as u8
 }
 
 pub fn score_project(
