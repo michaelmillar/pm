@@ -81,13 +81,12 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
         }
 
         let scan = scanner::scan_project(&path_str);
-        let today = Local::now().date_naive();
-        let project = match store.get_project(id)? {
+        let _today = Local::now().date_naive();
+        let _project = match store.get_project(id)? {
             Some(p) => p,
             None => continue,
         };
-        let score = cli_core::auto_score(&scan, project.created_at, today);
-        let mut readiness = score.readiness as i32;
+        let mut readiness = cli_core::auto_readiness(&scan) as i32;
         if let Some(cfg) = &standards_config {
             if let Ok(report) = standards::evaluate_repo(&path, cfg) {
                 readiness = (readiness + report.readiness_boost as i32).min(100);
@@ -102,7 +101,7 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
                 });
             }
         }
-        store.update_scores(id, score.impact, score.monetization, readiness as u8)?;
+        store.update_readiness(id, readiness as u8)?;
     }
 
     if standards_config.is_some() && !standards_reports.is_empty() {

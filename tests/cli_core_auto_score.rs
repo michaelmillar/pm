@@ -1,9 +1,8 @@
-use chrono::NaiveDate;
-use pm::cli_core::auto_score;
+use pm::cli_core::auto_readiness;
 use pm::domain::ScanResult;
 
 #[test]
-fn auto_score_bounds_and_defaults() {
+fn auto_readiness_bounds_and_defaults() {
     let scan = ScanResult {
         total_tasks: 0,
         completed_tasks: 0,
@@ -13,11 +12,6 @@ fn auto_score_bounds_and_defaults() {
         charter_filled: None,
     };
 
-    let today = NaiveDate::from_ymd_opt(2026, 2, 10).unwrap();
-    let created_at = NaiveDate::from_ymd_opt(2025, 2, 10).unwrap();
-
-    let score = auto_score(&scan, created_at, today);
-    assert!((1..=10).contains(&score.impact));
-    assert!((1..=10).contains(&score.monetization));
-    assert!((0..=100).contains(&score.readiness));
+    let readiness = auto_readiness(&scan);
+    assert!((0..=100).contains(&readiness));
 }

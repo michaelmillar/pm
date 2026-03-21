@@ -1,4 +1,4 @@
-use pm::cli_core::auto_score;
+use pm::cli_core::auto_readiness;
 use pm::discovery::discover_projects;
 use pm::scanner::scan_project;
 use pm::store::Store;
@@ -23,8 +23,7 @@ fn discovery_applies_standards_boost() {
     }
 
     let scan = scan_project(repo.to_str().unwrap());
-    let today = chrono::Local::now().date_naive();
-    let base = auto_score(&scan, today, today).readiness as i32;
+    let base = auto_readiness(&scan) as i32;
 
     let store = Store::open_in_memory().unwrap();
     discover_projects(&store, root.path()).unwrap();

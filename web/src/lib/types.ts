@@ -9,6 +9,7 @@ export interface Project {
   cloneability: number | null;
   defensibility: number;
   project_type: string;
+  vibe: number | null;
   priority_score: number;
   days_stale: number;
   last_activity: string;
