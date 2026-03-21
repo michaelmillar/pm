@@ -54,12 +54,8 @@
       <span class="axis-label">Monetisation</span>
     </div>
     <div class="axis">
-      <span class="axis-value">{detail.uniqueness ?? "\u2014"}</span>
-      <span class="axis-label">Uniqueness</span>
-    </div>
-    <div class="axis">
-      <span class="axis-value">{detail.cloneability ?? "\u2014"}</span>
-      <span class="axis-label">Cloneability</span>
+      <span class="axis-value">{detail.defensibility}</span>
+      <span class="axis-label">Defensibility</span>
     </div>
     <div class="axis">
       <span class="axis-value" style="color: {detail.days_stale > 30 ? 'var(--danger)' : detail.days_stale > 14 ? 'var(--warning)' : 'var(--accent)'}">{detail.days_stale}d</span>

@@ -5,6 +5,7 @@ pub mod cli;
 pub mod discovery;
 pub mod dod;
 pub mod domain;
+pub mod milestones;
 pub mod naming;
 pub mod research;
 pub mod roadmap;

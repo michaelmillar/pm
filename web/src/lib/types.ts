@@ -7,6 +7,8 @@ export interface Project {
   readiness: number;
   uniqueness: number | null;
   cloneability: number | null;
+  defensibility: number;
+  project_type: string;
   priority_score: number;
   days_stale: number;
   last_activity: string;
@@ -37,6 +39,7 @@ export interface Assessment {
   monetization: number;
   cloneability: number | null;
   uniqueness: number | null;
+  defensibility: number | null;
   researched_at: string;
   reasoning: string | null;
   signals: string[] | null;

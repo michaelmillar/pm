@@ -191,12 +191,27 @@ enum Commands {
         #[arg(long)]
         refresh: bool,
     },
+    /// Set a project's type (product, study, library)
+    Type {
+        /// Project ID
+        id: i64,
+        /// Project type
+        #[arg(value_enum)]
+        project_type: CliProjectType,
+    },
     /// Start the web dashboard
     Serve {
         /// Port to listen on
         #[arg(long, default_value = "3141")]
         port: u16,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliProjectType {
+    Product,
+    Study,
+    Library,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -207,8 +222,7 @@ enum StatusSort {
     Name,
     Impact,
     Monetization,
-    Uniqueness,
-    Cloneability,
+    Defensibility,
 }
 
 pub fn run() {
@@ -251,8 +265,23 @@ pub fn run() {
             plan,
         } => cmd_mark(&store, id, task_number, plan),
         Commands::Pivot { id, count, refresh } => cmd_pivot(&store, id, count, refresh),
+        Commands::Type { id, project_type } => cmd_type(&store, id, project_type),
         Commands::Serve { port } => cmd_serve(store, port),
     }
+}
+
+fn cmd_type(store: &Store, id: i64, project_type: CliProjectType) {
+    let pt = match project_type {
+        CliProjectType::Product => crate::domain::ProjectType::Product,
+        CliProjectType::Study => crate::domain::ProjectType::Study,
+        CliProjectType::Library => crate::domain::ProjectType::Library,
+    };
+    let count = store.update_project_type(id, &pt).unwrap();
+    if count == 0 {
+        println!("Project {} not found", id);
+        return;
+    }
+    println!("Project {} type set to '{}'", id, pt.as_str());
 }
 
 fn cmd_serve(store: Store, port: u16) {
@@ -285,6 +314,7 @@ fn enrich_with_roadmap(project: &mut crate::domain::Project) {
     if let Some(v) = scores.monetization { project.monetization = v; }
     project.cloneability = scores.cloneability;
     project.uniqueness = scores.uniqueness;
+    project.defensibility = scores.defensibility;
 }
 
 fn cmd_next(store: &Store) {
@@ -332,20 +362,20 @@ fn cmd_status_with_sort(store: &Store, sort: StatusSort) {
     let today = Local::now().date_naive();
     sort_projects_for_status(&mut projects, sort, today);
     println!("Active projects:\n");
-    println!("  ID  S  Project                      Ready             Stale  Score  Impact  Monet  Uniq  Clone  Next");
-    println!("  --  -  ---------------------------  ----------------  -----  -----  ------  -----  ----  -----  ----------------------------------");
+    println!("  ID  S  T  Project                      Ready             Stale  Score  Impact  Monet  Def  Next");
+    println!("  --  -  -  ---------------------------  ----------------  -----  -----  ------  -----  ---  ----------------------------------");
     for (idx, p) in projects.iter().enumerate() {
         let days_stale = (today - p.last_activity).num_days();
         let bar = progress_bar(p.readiness as usize, 10);
         let score = p.priority_score(today);
         let symbol = project_symbol(idx);
-        let uniq = p.uniqueness.map_or("—".to_string(), |u| u.to_string());
-        let clone = p.cloneability.map_or("—".to_string(), |c| c.to_string());
+        let def = p.effective_defensibility();
         let next = truncate(&next_milestone_for_project(p), 34);
         println!(
-            "  {:>2}  {}  {:<27}  {} {:>3}%  {:>4}d  {:>5}  {:>6}  {:>5}  {:>4}  {:>5}  {}",
+            "  {:>2}  {}  {}  {:<27}  {} {:>3}%  {:>4}d  {:>5}  {:>6}  {:>5}  {:>3}  {}",
             p.id,
             symbol,
+            p.project_type.short(),
             truncate(&p.name, 27),
             bar,
             p.readiness,
@@ -353,8 +383,7 @@ fn cmd_status_with_sort(store: &Store, sort: StatusSort) {
             score,
             p.impact,
             p.monetization,
-            uniq,
-            clone,
+            def,
             next
         );
     }
@@ -373,8 +402,7 @@ fn sort_projects_for_status(
             StatusSort::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             StatusSort::Impact => b.impact.cmp(&a.impact),
             StatusSort::Monetization => b.monetization.cmp(&a.monetization),
-            StatusSort::Uniqueness => b.uniqueness.unwrap_or(0).cmp(&a.uniqueness.unwrap_or(0)),
-            StatusSort::Cloneability => b.cloneability.unwrap_or(0).cmp(&a.cloneability.unwrap_or(0)),
+            StatusSort::Defensibility => b.effective_defensibility().cmp(&a.effective_defensibility()),
         };
         cmp.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
@@ -544,10 +572,10 @@ fn cmd_roadmap(store: &Store, id: i64, add_component: Option<Vec<String>>, force
             existing.clone()
         } else {
             println!("Assessment scores (Enter to use default; run 'pm research {}' to research properly):", id);
-            let impact       = prompt_score("  Impact       (1-10, how many people need this?)  ").unwrap_or(7);
-            let monetization = prompt_score("  Monetization (1-10, how well can it be monetised?)").unwrap_or(7);
-            let cloneability = prompt_score("  Cloneability (1-10, how hard to copy the value?) ").unwrap_or(6);
-            default_assessment_block(impact, monetization, cloneability)
+            let impact         = prompt_score("  Impact         (1-10, how many people need this?)    ").unwrap_or(7);
+            let monetization   = prompt_score("  Monetization   (1-10, how well can it be monetised?) ").unwrap_or(7);
+            let defensibility  = prompt_score("  Defensibility  (1-10, how hard to replicate?)        ").unwrap_or(6);
+            default_assessment_block(impact, monetization, defensibility)
         };
 
         build_roadmap_yaml(&project.name, &tasks, &phase_order, &assessment_block)
@@ -612,13 +640,13 @@ fn extract_assessment_block(yaml_content: &str) -> Option<String> {
     }
 }
 
-fn default_assessment_block(impact: u8, monetization: u8, cloneability: u8) -> String {
+fn default_assessment_block(impact: u8, monetization: u8, defensibility: u8) -> String {
     let today = Local::now().date_naive();
     format!(
-        "assessment:\n  impact: {impact}\n  monetization: {monetization}\n  uniqueness: 5\n  cloneability: {cloneability}\n  researched_at: \"{today}\"\n  reasoning: |\n    Impact {impact}: (run 'pm research <id>' to fill in)\n    Monetization {monetization}: (run 'pm research <id>' to fill in)\n    Uniqueness 5: (run 'pm research <id>' to fill in)\n    Cloneability {cloneability}: (run 'pm research <id>' to fill in)\n  signals:\n    - \"(add market evidence here)\"",
+        "assessment:\n  impact: {impact}\n  monetization: {monetization}\n  defensibility: {defensibility}\n  researched_at: \"{today}\"\n  reasoning: |\n    Impact {impact}: (run 'pm research <id>' to fill in)\n    Monetization {monetization}: (run 'pm research <id>' to fill in)\n    Defensibility {defensibility}: (run 'pm research <id>' to fill in)\n  signals:\n    - \"(add market evidence here)\"",
         impact = impact,
         monetization = monetization,
-        cloneability = cloneability,
+        defensibility = defensibility,
         today = today,
     )
 }
@@ -749,35 +777,38 @@ fn cmd_research_score(store: &Store, id: i64) {
     match research::run_score_from_summary(&project.name, &rec.summary) {
         Err(e) => println!("Error: {}", e),
         Ok(output) => {
-            let (parsed_impact, parsed_monetisation, parsed_uniqueness, parsed_cloneability) =
-                research::parse_axis_scores(&output);
-            if parsed_impact.is_none() && parsed_monetisation.is_none()
-                && parsed_uniqueness.is_none() && parsed_cloneability.is_none()
-            {
+            let scores = research::parse_axis_scores(&output);
+            if !scores.any_present() {
                 println!("Could not extract scores from summary. Try 'pm research {} --refresh'.", id);
                 return;
             }
-            let impact_val = parsed_impact.unwrap_or(project.impact);
-            let monet_val  = parsed_monetisation.unwrap_or(project.monetization);
-            store.update_assessment(id, impact_val, monet_val, parsed_cloneability, parsed_uniqueness).unwrap();
+            let impact_val = scores.impact.unwrap_or(project.impact);
+            let monet_val  = scores.monetisation.unwrap_or(project.monetization);
+            store.update_assessment(id, impact_val, monet_val, scores.cloneability, scores.uniqueness).unwrap();
+            store.update_defensibility(id, scores.defensibility).unwrap();
             if let Some(ref path) = project.path {
                 if let Err(e) = roadmap::patch_assessment_scores(
                     std::path::Path::new(path),
                     impact_val,
                     monet_val,
-                    parsed_cloneability,
-                    parsed_uniqueness,
+                    scores.cloneability,
+                    scores.uniqueness,
+                    scores.defensibility,
                 ) {
                     eprintln!("Warning: could not update roadmap.yaml: {}", e);
                 }
             }
             println!("Scores updated:");
-            println!("  impact:{}  monetisation:{}  uniqueness:{}  cloneability:{}",
+            println!("  impact:{}  monetisation:{}  defensibility:{}",
                 impact_val,
                 monet_val,
-                parsed_uniqueness.map_or("—".to_string(), |v| v.to_string()),
-                parsed_cloneability.map_or("—".to_string(), |v| v.to_string()),
+                scores.defensibility.map_or("?".to_string(), |v| v.to_string()),
             );
+            let age_days = (chrono::Local::now().date_naive() - project.created_at).num_days();
+            let warnings = research::validate_scores(&scores, &project.project_type, age_days);
+            for w in &warnings {
+                println!("  Warning: {}", w);
+            }
         }
     }
 }
@@ -827,21 +858,25 @@ fn run_research_for_project(store: &Store, id: i64, force: bool) {
             store.save_research(id, &current_summary).unwrap();
 
             // Parse and persist axis scores from LLM output
-            let (parsed_impact, parsed_monetisation, parsed_uniqueness, parsed_cloneability) =
-                research::parse_axis_scores(&current_summary);
-            if parsed_impact.is_some() || parsed_monetisation.is_some()
-                || parsed_uniqueness.is_some() || parsed_cloneability.is_some()
-            {
-                let impact_val = parsed_impact.unwrap_or(project.impact);
-                let monet_val  = parsed_monetisation.unwrap_or(project.monetization);
-                store.update_assessment(id, impact_val, monet_val, parsed_cloneability, parsed_uniqueness).unwrap();
+            let scores = research::parse_axis_scores(&current_summary);
+            if scores.any_present() {
+                let impact_val = scores.impact.unwrap_or(project.impact);
+                let monet_val  = scores.monetisation.unwrap_or(project.monetization);
+                store.update_assessment(id, impact_val, monet_val, scores.cloneability, scores.uniqueness).unwrap();
+                store.update_defensibility(id, scores.defensibility).unwrap();
                 let _ = roadmap::patch_assessment_scores(
                     std::path::Path::new(&path),
                     impact_val,
                     monet_val,
-                    parsed_cloneability,
-                    parsed_uniqueness,
+                    scores.cloneability,
+                    scores.uniqueness,
+                    scores.defensibility,
                 );
+                let age_days = (chrono::Local::now().date_naive() - project.created_at).num_days();
+                let warnings = research::validate_scores(&scores, &project.project_type, age_days);
+                for w in &warnings {
+                    println!("  Warning: {}", w);
+                }
             }
 
             println!("\n'{}' research complete.", project.name);
@@ -935,14 +970,13 @@ fn cmd_throne(store: &Store) {
 }
 
 fn cmd_why(store: &Store) {
-    println!("Priority formula: (impact×3) + (monetisation×2) + (uniqueness×2) + (readiness/10×4) + cloneability - staleness.min(30)");
+    println!("Priority formula: (impact x 3) + (monetisation x 2) + (defensibility x 2) + (readiness/10 x 4) - staleness.min(30)");
     println!("\nWeights grounded in:");
-    println!("  readiness    ×4  — Cal Newport / execution-first: bottleneck is rarely the idea");
-    println!("  impact       ×3  — YC 'make something people want': pain severity is the primary filter");
-    println!("  monetisation ×2  — Lean Startup validated learning: market willingness to pay");
-    println!("  uniqueness   ×2  — Blue Ocean Strategy: differentiation buys time before competition");
-    println!("  cloneability ×1  — Helmer 7 Powers: moat compounds at scale, lighter at inception");
-    println!("  staleness cap 30 — untouched projects lose context; hard cap prevents full exclusion");
+    println!("  readiness       x4  Cal Newport / execution-first: bottleneck is rarely the idea");
+    println!("  impact          x3  YC 'make something people want': pain severity is the primary filter");
+    println!("  monetisation    x2  Lean Startup validated learning: market willingness to pay");
+    println!("  defensibility   x2  Blue Ocean + Helmer 7 Powers: differentiation and moat combined");
+    println!("  staleness cap 30    untouched projects lose context; hard cap prevents full exclusion");
 
     let projects = store.list_active_projects().unwrap();
     if !projects.is_empty() {
@@ -952,11 +986,10 @@ fn cmd_why(store: &Store) {
 
         if let Some((top, score)) = scored.first() {
             println!("\nTop pick '{}' breakdown:", top.name);
-            println!("  impact({})x3 = {}", top.impact, top.impact as i32 * 3);
-            println!("  monetisation({})x2 = {}", top.monetization, top.monetization as i32 * 2);
-            println!("  uniqueness({})x2 = {}", top.uniqueness.unwrap_or(5), top.uniqueness.unwrap_or(5) as i32 * 2);
-            println!("  readiness({}/10)x4 = {}", top.readiness, (top.readiness as i32 / 10) * 4);
-            println!("  cloneability({}) = {}", top.cloneability.unwrap_or(5), top.cloneability.unwrap_or(5) as i32);
+            println!("  impact({}) x 3 = {}", top.impact, top.impact as i32 * 3);
+            println!("  monetisation({}) x 2 = {}", top.monetization, top.monetization as i32 * 2);
+            println!("  defensibility({}) x 2 = {}", top.effective_defensibility(), top.effective_defensibility() as i32 * 2);
+            println!("  readiness({}/10) x 4 = {}", top.readiness, (top.readiness as i32 / 10) * 4);
             let stale = (today - top.last_activity).num_days() as i32;
             println!("  staleness penalty = -{}", stale.min(30));
             println!("  TOTAL = {}", score);
@@ -1156,19 +1189,15 @@ fn cmd_show(store: &Store, id: i64) {
 
     println!("Project: {}", project.name);
     println!("ID: {}", project.id);
+    println!("Type: {}", project.project_type.as_str());
     println!("State: {:?}", project.state);
     println!();
     println!("Scores:");
-    println!("  Impact:       {}/10", project.impact);
-    println!("  Monetization: {}/10", project.monetization);
-    if let Some(u) = project.uniqueness {
-        println!("  Uniqueness:   {}/10", u);
-    }
-    if let Some(c) = project.cloneability {
-        println!("  Cloneability: {}/10", c);
-    }
-    println!("  Readiness:    {}%", project.readiness);
-    println!("  Priority:     {} (computed)", score);
+    println!("  Impact:         {}/10", project.impact);
+    println!("  Monetization:   {}/10", project.monetization);
+    println!("  Defensibility:  {}/10", project.effective_defensibility());
+    println!("  Readiness:      {}%", project.readiness);
+    println!("  Priority:       {} (computed)", score);
     println!();
     println!("Dates:");
     println!("  Created:       {}", project.created_at);

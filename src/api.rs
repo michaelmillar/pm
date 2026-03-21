@@ -27,13 +27,16 @@ pub struct ApiProject {
     pub readiness: u8,
     pub uniqueness: Option<u8>,
     pub cloneability: Option<u8>,
+    pub defensibility: u8,
     pub priority_score: i32,
     pub days_stale: i64,
     pub last_activity: String,
     pub created_at: String,
     pub soft_deadline: Option<String>,
     pub path: Option<String>,
+    pub project_type: String,
     pub next_milestone: Option<String>,
+    pub milestone_target: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -128,22 +131,44 @@ pub struct ApiNextRecommendation {
 
 fn project_to_api(p: &crate::domain::Project) -> ApiProject {
     let today = Local::now().date_naive();
+    let mut proj = p.clone();
+    // Enrich with live roadmap/milestones data so readiness is never stale
+    if let Some(ref path) = proj.path {
+        let project_path = FsPath::new(path);
+        if let Some(scores) = roadmap::load_scores(project_path) {
+            proj.readiness = scores.readiness;
+            if let Some(v) = scores.impact { proj.impact = v; }
+            if let Some(v) = scores.monetization { proj.monetization = v; }
+            proj.cloneability = scores.cloneability;
+            proj.uniqueness = scores.uniqueness;
+            proj.defensibility = scores.defensibility;
+        } else if let Some(mf) = crate::milestones::load_milestones(project_path) {
+            proj.readiness = mf.readiness();
+        }
+    }
+    let milestone_target = proj.path.as_ref().and_then(|path| {
+        let mf = crate::milestones::load_milestones(FsPath::new(path))?;
+        mf.target_summary()
+    });
     ApiProject {
-        id: p.id,
-        name: p.name.clone(),
-        state: state_str(&p.state),
-        impact: p.impact,
-        monetization: p.monetization,
-        readiness: p.readiness,
-        uniqueness: p.uniqueness,
-        cloneability: p.cloneability,
-        priority_score: p.priority_score(today),
-        days_stale: (today - p.last_activity).num_days(),
-        last_activity: p.last_activity.to_string(),
-        created_at: p.created_at.to_string(),
-        soft_deadline: p.soft_deadline.map(|d| d.to_string()),
-        path: p.path.clone(),
+        id: proj.id,
+        name: proj.name.clone(),
+        state: state_str(&proj.state),
+        impact: proj.impact,
+        monetization: proj.monetization,
+        readiness: proj.readiness,
+        uniqueness: proj.uniqueness,
+        cloneability: proj.cloneability,
+        defensibility: proj.effective_defensibility(),
+        priority_score: proj.priority_score(today),
+        days_stale: (today - proj.last_activity).num_days(),
+        last_activity: proj.last_activity.to_string(),
+        created_at: proj.created_at.to_string(),
+        soft_deadline: proj.soft_deadline.map(|d| d.to_string()),
+        project_type: proj.project_type.as_str().to_string(),
+        path: proj.path.clone(),
         next_milestone: compute_next_milestone(p),
+        milestone_target,
     }
 }
 

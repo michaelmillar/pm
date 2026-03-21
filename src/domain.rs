@@ -1,4 +1,37 @@
 #[derive(Debug, Clone, PartialEq)]
+pub enum ProjectType {
+    Product,
+    Study,
+    Library,
+}
+
+impl ProjectType {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "study" => ProjectType::Study,
+            "library" => ProjectType::Library,
+            _ => ProjectType::Product,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProjectType::Product => "product",
+            ProjectType::Study => "study",
+            ProjectType::Library => "library",
+        }
+    }
+
+    pub fn short(&self) -> &'static str {
+        match self {
+            ProjectType::Product => "P",
+            ProjectType::Study => "S",
+            ProjectType::Library => "L",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ProjectState {
     Inbox,
     Active,
@@ -24,6 +57,8 @@ pub struct Project {
     pub possible_duplicate_score: Option<f32>,
     pub cloneability: Option<u8>,
     pub uniqueness: Option<u8>,
+    pub defensibility: Option<u8>,
+    pub project_type: ProjectType,
 }
 
 #[derive(Debug, Clone)]
@@ -52,15 +87,31 @@ pub struct TaskStatus {
 }
 
 impl Project {
+    pub fn effective_defensibility(&self) -> u8 {
+        if let Some(d) = self.defensibility {
+            return d;
+        }
+        match (self.uniqueness, self.cloneability) {
+            (Some(u), Some(c)) => u.max(c),
+            (Some(u), None) => u,
+            (None, Some(c)) => c,
+            (None, None) => 5,
+        }
+    }
+
     pub fn priority_score(&self, today: chrono::NaiveDate) -> i32 {
         let staleness_days = (today - self.last_activity).num_days() as i32;
         let staleness_penalty = staleness_days.min(30);
 
+        let monet_weight = match self.project_type {
+            ProjectType::Product => 2,
+            ProjectType::Study | ProjectType::Library => 0,
+        };
+
         (self.impact as i32 * 3)
-            + (self.monetization as i32 * 2)
-            + (self.uniqueness.unwrap_or(5) as i32 * 2)
+            + (self.monetization as i32 * monet_weight)
+            + (self.effective_defensibility() as i32 * 2)
             + (self.readiness as i32 / 10 * 4)
-            + self.cloneability.unwrap_or(5) as i32
             - staleness_penalty
     }
 }
@@ -88,6 +139,8 @@ mod tests {
             duplicate_of: None,
             possible_duplicate_score: None,
             cloneability: None,
+            defensibility: None,
+            project_type: ProjectType::Product,
         }
     }
 
@@ -118,7 +171,7 @@ mod tests {
         assert!(score > 0);
     }
 
-    fn make_project_uniq(impact: u8, monetization: u8, readiness: u8, days_stale: i64, uniqueness: Option<u8>) -> Project {
+    fn make_project_def(impact: u8, monetization: u8, readiness: u8, days_stale: i64, defensibility: Option<u8>) -> Project {
         let today = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
         Project {
             id: 1,
@@ -127,7 +180,7 @@ mod tests {
             impact,
             monetization,
             readiness,
-            uniqueness,
+            uniqueness: None,
             last_activity: today - chrono::Duration::days(days_stale),
             created_at: today - chrono::Duration::days(30),
             soft_deadline: None,
@@ -136,14 +189,25 @@ mod tests {
             duplicate_of: None,
             possible_duplicate_score: None,
             cloneability: None,
+            defensibility,
+            project_type: ProjectType::Product,
         }
     }
 
     #[test]
-    fn test_priority_score_includes_uniqueness() {
+    fn test_priority_score_includes_defensibility() {
         let today = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
-        let with_uniq    = make_project_uniq(5, 5, 50, 0, Some(8));
-        let without_uniq = make_project_uniq(5, 5, 50, 0, Some(2));
-        assert!(with_uniq.priority_score(today) > without_uniq.priority_score(today));
+        let high_def = make_project_def(5, 5, 50, 0, Some(8));
+        let low_def  = make_project_def(5, 5, 50, 0, Some(2));
+        assert!(high_def.priority_score(today) > low_def.priority_score(today));
+    }
+
+    #[test]
+    fn test_priority_score_ignores_monetisation_for_study() {
+        let today = NaiveDate::from_ymd_opt(2026, 2, 5).unwrap();
+        let product = make_project(5, 10, 50, 0);
+        let mut study = make_project(5, 10, 50, 0);
+        study.project_type = ProjectType::Study;
+        assert!(product.priority_score(today) > study.priority_score(today));
     }
 }

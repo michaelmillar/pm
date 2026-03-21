@@ -69,8 +69,7 @@
     { key: "priority_score", label: "Score", numeric: true },
     { key: "impact", label: "Impact", numeric: true },
     { key: "monetization", label: "Monet", numeric: true },
-    { key: "uniqueness", label: "Uniq", numeric: true },
-    { key: "cloneability", label: "Clone", numeric: true },
+    { key: "defensibility", label: "Def", numeric: true },
   ];
 </script>
 
@@ -115,8 +114,7 @@
           </td>
           <td class="num">{p.impact}</td>
           <td class="num">{p.monetization}</td>
-          <td class="num">{p.uniqueness ?? "\u2014"}</td>
-          <td class="num">{p.cloneability ?? "\u2014"}</td>
+          <td class="num">{p.defensibility}</td>
           <td style="color: var(--ink-soft); font-size: 0.85rem">{p.next_milestone ?? "\u2014"}</td>
         </tr>
       {/each}
