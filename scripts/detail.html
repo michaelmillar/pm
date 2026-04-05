@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>pm detail</title>
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand">pm</div>
+    <nav>
+      <a href="#" class="active">Dashboard</a>
+      <a href="#">Inbox</a>
+      <a href="#">Charter</a>
+      <a href="#">Roadmap</a>
+    </nav>
+  </aside>
+  <main>
+    <p class="eyebrow">Project detail</p>
+    <h1>dash-builder</h1>
+    <div class="stage-track">
+      <div class="stage-pill done">Idea</div>
+      <div class="stage-pill current">Free shipped</div>
+      <div class="stage-pill">Traction</div>
+      <div class="stage-pill">Compensated</div>
+      <div class="stage-pill">Sustainable</div>
+    </div>
+    <div class="detail-grid" style="margin-top:28px">
+      <div class="card">
+        <h2>Archetype axes <span style="font-weight:normal;color:var(--muted);font-size:13px">(personal tool)</span></h2>
+        <div class="axes">
+          <div class="axis"><span class="axis-label">Utility</span><div class="axis-bar"><div style="width:90%"></div></div><span class="axis-val">9</span></div>
+          <div class="axis"><span class="axis-label">Friction reduction</span><div class="axis-bar"><div style="width:80%"></div></div><span class="axis-val">8</span></div>
+          <div class="axis"><span class="axis-label">Maintenance cost</span><div class="axis-bar"><div style="width:70%"></div></div><span class="axis-val">7</span></div>
+          <div class="axis"><span class="axis-label">Activity</span><div class="axis-bar"><div style="width:90%"></div></div><span class="axis-val">9</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Radar</h2>
+        <svg class="radar" viewBox="-180 -180 360 360">
+          <g stroke="#d8d2c5" fill="none">
+            <polygon points="0,-150 143,-46 88,121 -88,121 -143,-46"/>
+            <polygon points="0,-112 107,-35 66,91 -66,91 -107,-35"/>
+            <polygon points="0,-75 71,-23 44,61 -44,61 -71,-23"/>
+            <polygon points="0,-37 36,-12 22,30 -22,30 -36,-12"/>
+          </g>
+          <g stroke="#d8d2c5">
+            <line x1="0" y1="0" x2="0" y2="-150"/>
+            <line x1="0" y1="0" x2="143" y2="-46"/>
+            <line x1="0" y1="0" x2="88" y2="121"/>
+            <line x1="0" y1="0" x2="-88" y2="121"/>
+            <line x1="0" y1="0" x2="-143" y2="-46"/>
+          </g>
+          <polygon points="0,-135 114,-37 62,85 -70,96 -129,-41" fill="#1e3a5f" fill-opacity="0.25" stroke="#1e3a5f" stroke-width="2.5"/>
+          <g fill="#1e3a5f">
+            <circle cx="0" cy="-135" r="5"/>
+            <circle cx="114" cy="-37" r="5"/>
+            <circle cx="62" cy="85" r="5"/>
+            <circle cx="-70" cy="96" r="5"/>
+            <circle cx="-129" cy="-41" r="5"/>
+          </g>
+          <g font-family="Georgia, serif" font-size="13" fill="#5b6268" text-anchor="middle">
+            <text x="0" y="-162">utility</text>
+            <text x="165" y="-44">friction</text>
+            <text x="100" y="140">maintenance</text>
+            <text x="-100" y="140">activity</text>
+            <text x="-165" y="-44">stage</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
