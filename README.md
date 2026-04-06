@@ -129,15 +129,15 @@ Most project management tools optimise for teams working on one product. `pm` op
 | AirFocus / Productboard | Yes | No | No | No | No |
 | **`pm`** | **Yes** | **Yes** | **Yes** | **Yes** | **Yes** |
 
-**Where pm is stronger.** The only tool in the list that watches your git activity and computes priority without you clicking anything. Archetype-aware scoring, a research project does not compete on the same axes as a consumer app. LLM-assisted competitive research runs locally through whichever provider you already use. Pairs with [`reap`](https://github.com/michaelmillar/reap) for workspace upkeep.
+**Where pm is stronger.** The only tool in the list that watches your git activity and computes priority without you clicking anything. Archetype-aware scoring, a research project does not compete on the same axes as a consumer app. LLM-assisted competitive research runs locally through whichever provider you already use. Pairs with [`ward`](https://github.com/michaelmillar/ward) for workspace upkeep.
 
 **Where pm is weaker.** Single-user only, no team features. No time tracking. No Gantt charts. No calendar integration. No mobile client.
 
 **The closest alternative is a spreadsheet.** Many solo developers already keep one. `pm` automates the rows that spreadsheets never do, activity signals, archetype scoring, roadmap readiness, and standards checks.
 
-## How it fits with reap
+## How it fits with ward
 
-`reap` optionally reads `pm`'s SQLite database to surface project status when assessing repos to archive. The dependency is one-way, `pm` does not know `reap` exists. Different domain, different usage cadence, `pm` daily, `reap` monthly.
+`ward` optionally reads `pm`'s SQLite database to surface project status when assessing repos to archive. The dependency is one-way, `pm` does not know `ward` exists. Different domain, different usage cadence, `pm` daily, `ward` monthly.
 
 ## Status
 
