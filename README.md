@@ -2,10 +2,11 @@
   <img src="assets/logo.svg" width="200" alt="pm">
 </p>
 
-<h3 align="center">A portfolio allocator for solo developers</h3>
+<h3 align="center">Ranks your projects and tells you what to focus on, fix, or kill</h3>
 
 <p align="center">
-  Scans your codebases. Ranks your projects. Tells you what to focus on, what to fix, and what to kill.
+  Scans your codebases. Auto-scores from git activity and project structure.<br>
+  One command to decide what deserves your next hour.
 </p>
 
 ---
