@@ -2,19 +2,16 @@
   <img src="assets/logo.svg" width="200" alt="pm">
 </p>
 
-<h3 align="center">A priority-driven project manager for solo developers</h3>
+<h3 align="center">A portfolio allocator for solo developers</h3>
 
 <p align="center">
-  Tracks your whole portfolio. Auto-scores each project from git activity and filesystem signals.<br>
-  Tells you what to work on next.
+  Scans your codebases. Ranks your projects. Tells you what to focus on, what to fix, and what to kill.
 </p>
 
 ---
 
 <p align="center">
-  <a href="assets/demo.mp4">
-    <img src="assets/demo-poster.png" width="800" alt="pm demo (click to watch)">
-  </a>
+  <img src="assets/demo.svg" width="800" alt="pm demo">
 </p>
 
 ---
