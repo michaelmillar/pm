@@ -213,6 +213,12 @@ fn cmd_status(store: &Store, sort: StatusSort) {
         (p, score, action)
     }).collect();
 
+    scored.sort_by(|a, b| {
+        b.0.stage.cmp(&a.0.stage)
+            .then(b.1.cmp(&a.1))
+            .then((today - a.0.last_activity).num_days().cmp(&(today - b.0.last_activity).num_days()))
+    });
+
     match sort {
         StatusSort::Score => scored.sort_by(|a, b| b.1.cmp(&a.1)),
         StatusSort::Stale => scored.sort_by(|a, b| {
@@ -221,19 +227,30 @@ fn cmd_status(store: &Store, sort: StatusSort) {
             db.cmp(&da)
         }),
         StatusSort::Name => scored.sort_by(|a, b| a.0.name.cmp(&b.0.name)),
-        StatusSort::Stage => scored.sort_by(|a, b| b.0.stage.cmp(&a.0.stage).then(b.1.cmp(&a.1))),
+        StatusSort::Stage => {}
     }
 
     let dim = "\x1b[90m";
     let reset = "\x1b[0m";
     let bold = "\x1b[1m";
 
-    println!("{bold}{:>3}  {:<13} {:<10} {:>5}  {:<26} {:<6} {:>8} {:>5} {:>10} {:>8} {:>5}{reset}",
-        "#", "Action", "Stage", "Score", "Project", "Type",
+    println!("{bold}{:>3}  {:<13} {:>5}  {:<26} {:<6} {:>8} {:>5} {:>10} {:>8} {:>5}{reset}",
+        "#", "Action", "Score", "Project", "Type",
         "Velocity", "Fit", "Distinct", "Leverage", "Stale");
-    println!("{dim}{}{reset}", "\u{2500}".repeat(105));
+    println!("{dim}{}{reset}", "\u{2500}".repeat(98));
 
+    let mut last_stage: Option<u8> = None;
     for (rank, (p, score, action)) in scored.iter().enumerate() {
+        if last_stage != Some(p.stage) {
+            if last_stage.is_some() {
+                println!();
+            }
+            let count = scored.iter().filter(|(proj, _, _)| proj.stage == p.stage).count();
+            println!("{dim}  \u{2504}\u{2504} {} ({}) {}{reset}",
+                stage_label(p.stage), count, "\u{2504}".repeat(80));
+            last_stage = Some(p.stage);
+        }
+
         let act = action_icon(action.label());
         let days_stale = (today - p.last_activity).num_days();
         let icon = archetype_icon(p.project_type.short());
@@ -245,10 +262,9 @@ fn cmd_status(store: &Store, sort: StatusSort) {
             }
         };
 
-        println!("{:>3}  {:<24} {:<10} {:>5}  {:<26} {} {:<4} {:>3} {:>3} {:>3} {:>3} {:>4}d",
+        println!("{:>3}  {:<24} {:>5}  {:<26} {} {:<4} {:>3} {:>3} {:>3} {:>3} {:>4}d",
             rank + 1,
             act,
-            stage_label(p.stage),
             score,
             truncate(&p.name, 25),
             icon,

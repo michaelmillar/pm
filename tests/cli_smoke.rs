@@ -33,7 +33,6 @@ fn test_status_shows_new_columns() {
         .success()
         .stdout(predicate::str::contains("#"))
         .stdout(predicate::str::contains("Action"))
-        .stdout(predicate::str::contains("Stage"))
         .stdout(predicate::str::contains("Score"))
         .stdout(predicate::str::contains("Alpha Project"));
 }
