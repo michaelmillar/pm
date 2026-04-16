@@ -54,6 +54,45 @@ pub enum ProjectAction {
     Observe,
 }
 
+#[derive(Debug, Clone)]
+pub struct Thresholds {
+    pub kill_fit: u8,
+    pub kill_vel: u8,
+    pub kill_sunk: i32,
+    pub pivot_fit: u8,
+    pub pivot_vel: u8,
+    pub groom_fit: u8,
+    pub groom_vel: u8,
+    pub push_fit: u8,
+    pub push_vel: u8,
+    pub sustain_fit: u8,
+    pub integrate_dist: u8,
+    pub repurpose_lev: u8,
+    pub repurpose_sunk: i32,
+    pub ship_stage: u8,
+}
+
+impl Default for Thresholds {
+    fn default() -> Self {
+        Self {
+            kill_fit: 3,
+            kill_vel: 3,
+            kill_sunk: 30,
+            pivot_fit: 3,
+            pivot_vel: 5,
+            groom_fit: 6,
+            groom_vel: 3,
+            push_fit: 6,
+            push_vel: 6,
+            sustain_fit: 6,
+            integrate_dist: 3,
+            repurpose_lev: 3,
+            repurpose_sunk: 60,
+            ship_stage: 4,
+        }
+    }
+}
+
 impl ProjectAction {
     pub fn label(&self) -> &str {
         match self {
@@ -133,6 +172,10 @@ impl Project {
     }
 
     pub fn action_recommendation(&self, nearest_neighbour: Option<&str>) -> ProjectAction {
+        self.action_with_thresholds(&Thresholds::default(), nearest_neighbour)
+    }
+
+    pub fn action_with_thresholds(&self, t: &Thresholds, nearest_neighbour: Option<&str>) -> ProjectAction {
         let fit = self.fit_signal;
         let vel = self.velocity;
         let dist = self.distinctness;
@@ -140,32 +183,32 @@ impl Project {
         let sunk = self.sunk_cost_days.unwrap_or(0);
 
         if let (Some(f), Some(v)) = (fit, vel) {
-            if f < 3 && v < 3 && sunk > 30 {
+            if f < t.kill_fit && v < t.kill_vel && sunk > t.kill_sunk {
                 return ProjectAction::Kill;
             }
-            if f < 3 && v >= 5 {
+            if f < t.pivot_fit && v >= t.pivot_vel {
                 return ProjectAction::Pivot;
             }
-            if f >= 6 && v < 3 && self.stage < 4 {
+            if f >= t.groom_fit && v < t.groom_vel && self.stage < t.ship_stage {
                 return ProjectAction::Groom;
             }
-            if f >= 6 && v >= 6 && self.stage < 4 {
+            if f >= t.push_fit && v >= t.push_vel && self.stage < t.ship_stage {
                 return ProjectAction::Push;
             }
         }
         if let Some(f) = fit {
-            if f >= 6 && self.stage >= 4 {
+            if f >= t.sustain_fit && self.stage >= t.ship_stage {
                 return ProjectAction::Sustain;
             }
         }
         if let Some(d) = dist {
-            if d < 3 {
+            if d < t.integrate_dist {
                 let target = nearest_neighbour.unwrap_or("unknown").to_string();
                 return ProjectAction::Integrate(target);
             }
         }
-        if let (Some(l), true) = (lev, sunk > 60) {
-            if l < 3 {
+        if let (Some(l), true) = (lev, sunk > t.repurpose_sunk) {
+            if l < t.repurpose_lev {
                 return ProjectAction::Repurpose;
             }
         }

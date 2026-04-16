@@ -83,6 +83,8 @@ enum Commands {
     },
     /// Run one-shot schema migration from legacy model
     Migrate,
+    /// Calibrate action thresholds from event history
+    Calibrate,
     /// Show highest-priority project
     Next,
     /// List deleted projects
@@ -137,6 +139,7 @@ pub fn run() {
         Commands::Web { port } => cmd_web(store, port),
         Commands::Scan { fetch } => cmd_scan(&store, fetch),
         Commands::Pivot { id, reason } => cmd_pivot(&store, id, reason),
+        Commands::Calibrate => cmd_calibrate(&store),
         Commands::Migrate => cmd_migrate(&store),
         Commands::Next => cmd_next(&store),
         Commands::Trash => cmd_trash(&store),
@@ -203,8 +206,9 @@ fn cmd_status(store: &Store, sort: StatusSort) {
     }
 
     let today = Local::now().date_naive();
+    let thresholds = store.load_thresholds().unwrap_or_default();
     let mut scored: Vec<_> = projects.iter().map(|p| {
-        let action = p.action_recommendation(None);
+        let action = p.action_with_thresholds(&thresholds, None);
         let score = p.priority_score(today);
         (p, score, action)
     }).collect();
@@ -278,7 +282,8 @@ fn cmd_show(store: &Store, id: i64) {
         None => { println!("Project {} not found", id); return; }
     };
     let today = Local::now().date_naive();
-    let action = project.action_recommendation(None);
+    let thresholds = store.load_thresholds().unwrap_or_default();
+    let action = project.action_with_thresholds(&thresholds, None);
     let days_stale = (today - project.last_activity).num_days();
 
     println!("{} (id={})", project.name, project.id);
@@ -427,6 +432,26 @@ fn cmd_pivot(store: &Store, id: i64, reason: Option<String>) {
         project.name, project.pivot_count + 1);
 }
 
+fn cmd_calibrate(store: &Store) {
+    let projects = store.list_active_projects().unwrap();
+    let stage_events = store.list_all_stage_events().unwrap();
+    let pivot_events = store.list_all_pivot_events().unwrap();
+
+    let result = crate::scoring::calibrate::compute_thresholds(
+        &projects, &stage_events, &pivot_events,
+    );
+
+    println!("Calibration ({} events analysed)", result.event_count);
+    for adj in &result.adjustments {
+        println!("  {}", adj);
+    }
+
+    if result.event_count >= 10 {
+        store.save_thresholds(&result.thresholds).unwrap();
+        println!("Thresholds saved. Will be used by pm status and pm scan.");
+    }
+}
+
 fn cmd_migrate(store: &Store) {
     match store.migrate_scoring() {
         Ok(count) => println!("Migrated {} projects to new scoring model", count),
@@ -441,8 +466,9 @@ fn cmd_next(store: &Store) {
         return;
     }
     let today = Local::now().date_naive();
+    let thresholds = store.load_thresholds().unwrap_or_default();
     let best = projects.iter().max_by_key(|p| p.priority_score(today)).unwrap();
-    let action = best.action_recommendation(None);
+    let action = best.action_with_thresholds(&thresholds, None);
     println!("{} (score={}, action={}, stage={})",
         best.name, best.priority_score(today), action.label(), stage_label(best.stage));
 }

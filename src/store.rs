@@ -6,6 +6,22 @@ pub struct Store {
     conn: Connection,
 }
 
+#[derive(Debug, Clone)]
+pub struct StageEvent {
+    pub project_id: i64,
+    pub from_stage: u8,
+    pub to_stage: u8,
+    pub occurred_at: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PivotEvent {
+    pub project_id: i64,
+    pub occurred_at: String,
+    pub reason: Option<String>,
+}
+
 const PROJECT_COLUMNS: &str =
     "id, name, state, project_type, stage, velocity, fit_signal, distinctness, leverage, \
      sunk_cost_days, pivot_count, last_activity, created_at, soft_deadline, path, \
@@ -336,6 +352,126 @@ impl Store {
             params![id],
             |r| r.get(0),
         )
+    }
+
+    pub fn list_stage_events(&self, project_id: i64) -> Result<Vec<StageEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project_id, from_stage, to_stage, occurred_at, reason
+             FROM stage_events WHERE project_id = ?1
+             ORDER BY occurred_at LIMIT 1000"
+        )?;
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok(StageEvent {
+                project_id: row.get(0)?,
+                from_stage: row.get(1)?,
+                to_stage: row.get(2)?,
+                occurred_at: row.get(3)?,
+                reason: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_all_stage_events(&self) -> Result<Vec<StageEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project_id, from_stage, to_stage, occurred_at, reason
+             FROM stage_events ORDER BY occurred_at LIMIT 10000"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(StageEvent {
+                project_id: row.get(0)?,
+                from_stage: row.get(1)?,
+                to_stage: row.get(2)?,
+                occurred_at: row.get(3)?,
+                reason: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_all_pivot_events(&self) -> Result<Vec<PivotEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project_id, occurred_at, reason
+             FROM pivot_events ORDER BY occurred_at LIMIT 10000"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(PivotEvent {
+                project_id: row.get(0)?,
+                occurred_at: row.get(1)?,
+                reason: row.get(2)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn save_thresholds(&self, t: &crate::domain::Thresholds) -> Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS calibration (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            )"
+        )?;
+        let pairs: Vec<(&str, i32)> = vec![
+            ("kill_fit", t.kill_fit as i32),
+            ("kill_vel", t.kill_vel as i32),
+            ("kill_sunk", t.kill_sunk),
+            ("pivot_fit", t.pivot_fit as i32),
+            ("pivot_vel", t.pivot_vel as i32),
+            ("groom_fit", t.groom_fit as i32),
+            ("groom_vel", t.groom_vel as i32),
+            ("push_fit", t.push_fit as i32),
+            ("push_vel", t.push_vel as i32),
+            ("sustain_fit", t.sustain_fit as i32),
+            ("integrate_dist", t.integrate_dist as i32),
+            ("repurpose_lev", t.repurpose_lev as i32),
+            ("repurpose_sunk", t.repurpose_sunk),
+            ("ship_stage", t.ship_stage as i32),
+        ];
+        for (key, value) in pairs {
+            self.conn.execute(
+                "INSERT OR REPLACE INTO calibration (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn load_thresholds(&self) -> Result<crate::domain::Thresholds> {
+        let exists: bool = self.conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='calibration'"
+        )?.exists([])?;
+
+        if !exists {
+            return Ok(crate::domain::Thresholds::default());
+        }
+
+        let mut t = crate::domain::Thresholds::default();
+        let mut stmt = self.conn.prepare("SELECT key, value FROM calibration")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+        })?;
+
+        for row in rows {
+            let (key, value) = row?;
+            match key.as_str() {
+                "kill_fit" => t.kill_fit = value as u8,
+                "kill_vel" => t.kill_vel = value as u8,
+                "kill_sunk" => t.kill_sunk = value,
+                "pivot_fit" => t.pivot_fit = value as u8,
+                "pivot_vel" => t.pivot_vel = value as u8,
+                "groom_fit" => t.groom_fit = value as u8,
+                "groom_vel" => t.groom_vel = value as u8,
+                "push_fit" => t.push_fit = value as u8,
+                "push_vel" => t.push_vel = value as u8,
+                "sustain_fit" => t.sustain_fit = value as u8,
+                "integrate_dist" => t.integrate_dist = value as u8,
+                "repurpose_lev" => t.repurpose_lev = value as u8,
+                "repurpose_sunk" => t.repurpose_sunk = value,
+                "ship_stage" => t.ship_stage = value as u8,
+                _ => {}
+            }
+        }
+        Ok(t)
     }
 
     pub fn migrate_scoring(&self) -> Result<i64> {
