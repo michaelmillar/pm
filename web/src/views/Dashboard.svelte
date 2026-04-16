@@ -5,7 +5,7 @@
 
   let projects: Project[] = $state([]);
   let loading = $state(true);
-  let sortKey: keyof Project = $state("priority_score");
+  let sortKey: keyof Project = $state("score");
   let sortAsc = $state(false);
 
   let sorted = $derived(
@@ -43,16 +43,17 @@
     return sortAsc ? " \u25B4" : " \u25BE";
   }
 
-  function readinessSegments(pct: number): boolean[] {
-    const filled = Math.round(pct / 10);
-    return Array.from({ length: 10 }, (_, i) => i < filled);
-  }
-
-  function scoreColour(score: number): string {
-    if (score >= 50) return "var(--success)";
-    if (score >= 30) return "var(--accent)";
-    if (score >= 15) return "var(--warning)";
-    return "var(--danger)";
+  function actionColour(action: string): string {
+    switch (action) {
+      case "KILL": return "var(--danger)";
+      case "PIVOT": return "var(--warning)";
+      case "PUSH": return "var(--success)";
+      case "GROOM": return "var(--accent)";
+      case "INTEGRATE": return "var(--info, #9b59b6)";
+      case "SUSTAIN": return "var(--info, #3498db)";
+      case "REPURPOSE": return "var(--warning)";
+      default: return "var(--ink-soft)";
+    }
   }
 
   function staleColour(days: number): string {
@@ -61,15 +62,22 @@
     return "var(--ink-soft)";
   }
 
+  function axisDisplay(v: number | null): string {
+    return v != null ? String(v) : "\u2014";
+  }
+
   type SortableKey = keyof Project;
   const columns: { key: SortableKey; label: string; numeric: boolean }[] = [
     { key: "name", label: "Project", numeric: false },
-    { key: "readiness", label: "Ready", numeric: true },
+    { key: "archetype", label: "Type", numeric: false },
+    { key: "stage_label", label: "Stage", numeric: false },
+    { key: "score", label: "Score", numeric: true },
+    { key: "action", label: "Action", numeric: false },
+    { key: "velocity", label: "V", numeric: true },
+    { key: "fit_signal", label: "F", numeric: true },
+    { key: "distinctness", label: "D", numeric: true },
+    { key: "leverage", label: "L", numeric: true },
     { key: "days_stale", label: "Stale", numeric: true },
-    { key: "priority_score", label: "Score", numeric: true },
-    { key: "impact", label: "Impact", numeric: true },
-    { key: "monetization", label: "Monet", numeric: true },
-    { key: "defensibility", label: "Def", numeric: true },
   ];
 </script>
 
@@ -91,7 +99,6 @@
             {col.label}{sortIndicator(col.key)}
           </th>
         {/each}
-        <th>Next milestone</th>
       </tr>
     </thead>
     <tbody>
@@ -101,27 +108,24 @@
             <ProjectIcon name={p.name} size={22} />
             <span class="name-col">
               <span class="project-name">{p.name}</span>
-              {#if p.usp}<span class="project-usp">{p.usp}</span>{/if}
             </span>
           </td>
+          <td><span class="type-badge">{p.archetype}</span></td>
+          <td>{p.stage_label}</td>
+          <td class="num">{p.score}</td>
           <td>
-            <span class="readiness-bar">
-              {#each readinessSegments(p.readiness) as filled}
-                <span class="segment" class:filled></span>
-              {/each}
+            <span class="action-pill" style="color: {actionColour(p.action)}">
+              {p.action}
             </span>
-            <span class="readiness-pct">{p.readiness}%</span>
+            {#if p.action_target}
+              <span class="action-target">&rarr; {p.action_target}</span>
+            {/if}
           </td>
+          <td class="num">{axisDisplay(p.velocity)}</td>
+          <td class="num">{axisDisplay(p.fit_signal)}</td>
+          <td class="num">{axisDisplay(p.distinctness)}</td>
+          <td class="num">{axisDisplay(p.leverage)}</td>
           <td class="num" style="color: {staleColour(p.days_stale)}">{p.days_stale}d</td>
-          <td class="num">
-            <span class="score-pill" style="color: {scoreColour(p.priority_score)}">
-              {p.priority_score}
-            </span>
-          </td>
-          <td class="num">{p.impact}</td>
-          <td class="num">{p.monetization}</td>
-          <td class="num">{p.defensibility}</td>
-          <td style="color: var(--ink-soft); font-size: 0.85rem">{p.next_milestone ?? "\u2014"}</td>
         </tr>
       {/each}
     </tbody>

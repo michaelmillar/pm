@@ -14,7 +14,7 @@ fn discover_only_git_repos() {
     let store = Store::open_in_memory().unwrap();
     discover_projects(&store, root.path()).unwrap();
 
-    let projects = store.list_inbox_projects().unwrap();
+    let projects = store.list_active_projects().unwrap();
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].name, "repo1");
 }

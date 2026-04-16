@@ -1,9 +1,6 @@
-use crate::cli_core;
 use crate::similarity;
 use crate::scanner;
-use crate::standards;
 use crate::store::Store;
-use chrono::Local;
 use std::error::Error;
 use std::path::Path;
 use std::collections::HashSet;
@@ -24,8 +21,6 @@ const DEFAULT_IGNORED_FOLDERS: &[&str] = &[
 ];
 
 pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error>> {
-    let standards_config = standards::StandardsConfig::load().ok();
-    let mut standards_reports: Vec<standards::RepoStandardsReport> = Vec::new();
     let existing_projects = store.list_projects_for_dedupe()?;
     let entries = std::fs::read_dir(root)?;
     for entry in entries.flatten() {
@@ -81,34 +76,9 @@ pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error
         }
 
         let scan = scanner::scan_project(&path_str);
-        let _today = Local::now().date_naive();
-        let _project = match store.get_project(id)? {
-            Some(p) => p,
-            None => continue,
-        };
-        let mut readiness = cli_core::auto_readiness(&scan) as i32;
-        if let Some(cfg) = &standards_config {
-            if let Ok(report) = standards::evaluate_repo(&path, cfg) {
-                readiness = (readiness + report.readiness_boost as i32).min(100);
-                standards_reports.push(standards::RepoStandardsReport {
-                    name: name.clone(),
-                    path: path_str.clone(),
-                    requirements_met: report.requirements_met,
-                    nice_to_haves_met: report.nice_to_haves_met,
-                    readiness_boost: report.readiness_boost,
-                    fixes: report.fixes.clone(),
-                    missing: report.missing.clone(),
-                });
-            }
+        if let Some(date) = scan.last_commit_date {
+            store.update_from_scan(id, date)?;
         }
-        store.update_readiness(id, readiness as u8)?;
-    }
-
-    if standards_config.is_some() && !standards_reports.is_empty() {
-        let report_path = std::env::var("PM_STANDARDS_REPORT")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| standards::default_report_path());
-        let _ = standards::write_report(&report_path, &standards_reports);
     }
 
     Ok(())

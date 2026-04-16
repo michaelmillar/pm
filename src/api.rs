@@ -6,13 +6,9 @@ use axum::{
 };
 use chrono::Local;
 use serde::Serialize;
-use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex};
 
-use crate::dod;
-use crate::domain::{ProjectState, TaskSource};
-use crate::roadmap;
-use crate::scanner;
+use crate::domain::ProjectState;
 use crate::store::Store;
 
 pub type AppState = Arc<Mutex<Store>>;
@@ -22,107 +18,29 @@ pub struct ApiProject {
     pub id: i64,
     pub name: String,
     pub state: String,
-    pub impact: u8,
-    pub monetization: u8,
-    pub readiness: u8,
-    pub uniqueness: Option<u8>,
-    pub cloneability: Option<u8>,
-    pub defensibility: u8,
-    pub priority_score: i32,
+    pub archetype: String,
+    pub stage: u8,
+    pub stage_label: String,
+    pub velocity: Option<u8>,
+    pub fit_signal: Option<u8>,
+    pub distinctness: Option<u8>,
+    pub leverage: Option<u8>,
+    pub score: i32,
+    pub action: String,
+    pub action_target: Option<String>,
     pub days_stale: i64,
     pub last_activity: String,
     pub created_at: String,
     pub soft_deadline: Option<String>,
     pub path: Option<String>,
-    pub project_type: String,
-    pub vibe: Option<u8>,
-    pub next_milestone: Option<String>,
-    pub milestone_target: Option<String>,
-    pub usp: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct ApiProjectDetail {
     #[serde(flatten)]
     pub project: ApiProject,
-    pub inbox_note: Option<String>,
-    pub roadmap: Option<ApiRoadmap>,
-    pub dod: Option<ApiDod>,
-    pub research: Option<ApiResearch>,
-    pub tasks: Vec<ApiTask>,
-}
-
-#[derive(Serialize)]
-pub struct ApiRoadmap {
-    pub project: String,
-    pub assessment: Option<ApiAssessment>,
-    pub phases: Vec<ApiPhase>,
-    pub readiness: u8,
-    pub weight_valid: bool,
-}
-
-#[derive(Serialize)]
-pub struct ApiAssessment {
-    pub impact: u8,
-    pub monetization: u8,
-    pub cloneability: Option<u8>,
-    pub uniqueness: Option<u8>,
-    pub researched_at: String,
-    pub reasoning: Option<String>,
-    pub signals: Option<Vec<String>>,
-    pub stale: bool,
-}
-
-#[derive(Serialize)]
-pub struct ApiPhase {
-    pub id: String,
-    pub label: String,
-    pub weight: f64,
-    pub component: Option<String>,
-    pub tasks: Vec<ApiRoadmapTask>,
-    pub progress: f64,
-}
-
-#[derive(Serialize)]
-pub struct ApiRoadmapTask {
-    pub id: String,
-    pub label: String,
-    pub done: bool,
-}
-
-#[derive(Serialize)]
-pub struct ApiDod {
-    pub project_name: String,
-    pub usp: String,
-    pub criteria: Vec<ApiCriterion>,
-    pub complete: usize,
-    pub total: usize,
-}
-
-#[derive(Serialize)]
-pub struct ApiCriterion {
-    pub id: String,
-    pub description: String,
-    pub evidence: Option<String>,
-    pub scenario: String,
-    pub automated: String,
-    pub human: String,
-}
-
-#[derive(Serialize)]
-pub struct ApiResearch {
-    pub summary: String,
-    pub previous: Option<String>,
-    pub researched_at: Option<String>,
-    pub consecutive_flags: i64,
-}
-
-#[derive(Serialize)]
-pub struct ApiTask {
-    pub plan_file: String,
-    pub task_number: usize,
-    pub description: String,
-    pub source: String,
+    pub sunk_cost_days: Option<i32>,
+    pub pivot_count: u32,
 }
 
 #[derive(Serialize)]
@@ -131,373 +49,148 @@ pub struct ApiNextRecommendation {
     pub reason: String,
 }
 
-fn project_to_api(p: &crate::domain::Project) -> ApiProject {
+fn stage_label(stage: u8) -> &'static str {
+    match stage {
+        0 => "idea",
+        1 => "spike",
+        2 => "prototype",
+        3 => "validated",
+        4 => "shipped",
+        5 => "traction+",
+        _ => "unknown",
+    }
+}
+
+fn project_to_api(p: &crate::domain::Project, all_projects: &[crate::domain::Project]) -> ApiProject {
     let today = Local::now().date_naive();
-    let mut proj = p.clone();
-    // Enrich with live roadmap/milestones data so readiness is never stale
-    if let Some(ref path) = proj.path {
-        let project_path = FsPath::new(path);
-        if let Some(scores) = roadmap::load_scores(project_path) {
-            proj.readiness = scores.readiness;
-            if let Some(v) = scores.impact { proj.impact = v; }
-            if let Some(v) = scores.monetization { proj.monetization = v; }
-            proj.cloneability = scores.cloneability;
-            proj.uniqueness = scores.uniqueness;
-            proj.defensibility = scores.defensibility;
-        } else if let Some(mf) = crate::milestones::load_milestones(project_path) {
-            proj.readiness = mf.readiness();
-        }
-    }
-    let milestone_target = proj.path.as_ref().and_then(|path| {
-        let mf = crate::milestones::load_milestones(FsPath::new(path))?;
-        mf.target_summary()
-    });
-    let usp = proj.path.as_ref()
-        .and_then(|path| dod::extract_usp_from_charter(FsPath::new(path)));
+
+    let nearest = find_nearest_neighbour(p, all_projects);
+    let action = p.action_recommendation(nearest.as_deref());
+
     ApiProject {
-        id: proj.id,
-        name: proj.name.clone(),
-        state: state_str(&proj.state),
-        impact: proj.impact,
-        monetization: proj.monetization,
-        readiness: proj.readiness,
-        uniqueness: proj.uniqueness,
-        cloneability: proj.cloneability,
-        defensibility: proj.effective_defensibility(),
-        priority_score: proj.priority_score(today),
-        days_stale: (today - proj.last_activity).num_days(),
-        last_activity: proj.last_activity.to_string(),
-        created_at: proj.created_at.to_string(),
-        soft_deadline: proj.soft_deadline.map(|d| d.to_string()),
-        project_type: proj.project_type.as_str().to_string(),
-        vibe: proj.vibe,
-        path: proj.path.clone(),
-        next_milestone: compute_next_milestone(p),
-        milestone_target,
-        usp,
+        id: p.id,
+        name: p.name.clone(),
+        state: match p.state {
+            ProjectState::Active => "active".to_string(),
+            ProjectState::Archived => "archived".to_string(),
+        },
+        archetype: p.project_type.as_str().to_string(),
+        stage: p.stage,
+        stage_label: stage_label(p.stage).to_string(),
+        velocity: p.velocity,
+        fit_signal: p.fit_signal,
+        distinctness: p.distinctness,
+        leverage: p.leverage,
+        score: p.priority_score(today),
+        action: action.label().to_string(),
+        action_target: action.target().map(|s| s.to_string()),
+        days_stale: (today - p.last_activity).num_days(),
+        last_activity: p.last_activity.to_string(),
+        created_at: p.created_at.to_string(),
+        soft_deadline: p.soft_deadline.map(|d| d.to_string()),
+        path: p.path.clone(),
     }
 }
 
-fn state_str(state: &ProjectState) -> String {
-    match state {
-        ProjectState::Inbox => "inbox",
-        ProjectState::Active => "active",
-        ProjectState::Parked => "parked",
-        ProjectState::Shipped => "shipped",
-        ProjectState::Killed => "killed",
-    }
-    .to_string()
-}
-
-fn compute_next_milestone(p: &crate::domain::Project) -> Option<String> {
-    let path = p.path.as_ref()?;
-    let project_path = FsPath::new(path);
-
-    if let Some(rm) = roadmap::load_roadmap(project_path) {
-        for phase in &rm.phases {
-            for task in &phase.tasks {
-                if !task.done {
-                    return Some(format!("{}: {}", phase.label, task.label));
-                }
-            }
+fn find_nearest_neighbour(target: &crate::domain::Project, all: &[crate::domain::Project]) -> Option<String> {
+    use crate::similarity::token_similarity;
+    let mut best_score = 0.0f32;
+    let mut best_name = None;
+    for other in all {
+        if other.id == target.id { continue; }
+        let sim = token_similarity(&target.name, &other.name);
+        if sim > best_score {
+            best_score = sim;
+            best_name = Some(other.name.clone());
         }
-        return Some("Done".to_string());
     }
+    if best_score > 0.3 { best_name } else { None }
+}
 
-    let mut pending: Vec<_> = scanner::list_tasks(project_path)
-        .into_iter()
-        .filter(|t| t.source == TaskSource::Pending)
+pub fn build_router(state: AppState) -> Router {
+    let api = Router::new()
+        .route("/projects", get(list_projects))
+        .route("/projects/{id}", get(get_project_detail))
+        .route("/archived", get(list_archived))
+        .route("/next", get(get_next))
+        .with_state(state);
+
+    Router::new().nest("/api", api)
+}
+
+async fn list_projects(
+    State(store): State<AppState>,
+) -> Result<Json<Vec<ApiProject>>, StatusCode> {
+    let store = store.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let projects = store
+        .list_active_projects()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut api_projects: Vec<ApiProject> = projects
+        .iter()
+        .map(|p| project_to_api(p, &projects))
         .collect();
-    pending.sort_by(|a, b| {
-        a.plan_file
-            .cmp(&b.plan_file)
-            .then_with(|| a.task_number.cmp(&b.task_number))
-    });
-    pending.first().map(|t| t.description.clone())
+    api_projects.sort_by(|a, b| b.score.cmp(&a.score));
+    Ok(Json(api_projects))
 }
 
-fn roadmap_to_api(rm: &roadmap::Roadmap) -> ApiRoadmap {
-    let readiness = roadmap::compute_readiness(rm);
-    let weight_valid = roadmap::validate_weights(rm).is_none();
-
-    ApiRoadmap {
-        project: rm.project.clone(),
-        assessment: rm.assessment.as_ref().map(|a| {
-            let stale = roadmap::is_assessment_stale(&a.researched_at);
-            ApiAssessment {
-                impact: a.impact,
-                monetization: a.monetization,
-                cloneability: a.cloneability,
-                uniqueness: a.uniqueness,
-                researched_at: a.researched_at.clone(),
-                reasoning: a.reasoning.clone(),
-                signals: a.signals.clone(),
-                stale,
-            }
-        }),
-        phases: rm
-            .phases
-            .iter()
-            .map(|phase| {
-                let total = phase.tasks.len();
-                let done = phase.tasks.iter().filter(|t| t.done).count();
-                let progress = if total > 0 {
-                    done as f64 / total as f64
-                } else {
-                    0.0
-                };
-                ApiPhase {
-                    id: phase.id.clone(),
-                    label: phase.label.clone(),
-                    weight: phase.weight,
-                    component: phase.component.clone(),
-                    tasks: phase
-                        .tasks
-                        .iter()
-                        .map(|t| ApiRoadmapTask {
-                            id: t.id.clone(),
-                            label: t.label.clone(),
-                            done: t.done,
-                        })
-                        .collect(),
-                    progress,
-                }
-            })
-            .collect(),
-        readiness,
-        weight_valid,
-    }
-}
-
-fn dod_to_api(d: &dod::DodFile) -> ApiDod {
-    let (complete, total) = dod::rollup(d);
-    ApiDod {
-        project_name: d.project_name.clone(),
-        usp: d.usp.clone(),
-        criteria: d
-            .criteria
-            .iter()
-            .map(|c| ApiCriterion {
-                id: c.id.clone(),
-                description: c.description.clone(),
-                evidence: c.evidence.clone(),
-                scenario: c.scenario.clone(),
-                automated: c.automated.label().to_string(),
-                human: c.human.label().to_string(),
-            })
-            .collect(),
-        complete,
-        total,
-    }
-}
-
-async fn list_projects(State(state): State<AppState>) -> Json<Vec<ApiProject>> {
-    let store = state.lock().unwrap();
-    let projects = store.list_active_projects().unwrap_or_default();
-    Json(projects.iter().map(project_to_api).collect())
-}
-
-async fn get_project(
-    State(state): State<AppState>,
+async fn get_project_detail(
+    State(store): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiProjectDetail>, StatusCode> {
-    let store = state.lock().unwrap();
+    let store = store.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let project = store
         .get_project(id)
-        .unwrap_or(None)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
-    let inbox_note = store.get_inbox_note(id).unwrap_or(None);
-    let research = store.get_research(id).unwrap_or(None);
-    drop(store);
-
-    let rm = project
-        .path
-        .as_ref()
-        .and_then(|p| roadmap::load_roadmap(FsPath::new(p)));
-    let dod_data = project
-        .path
-        .as_ref()
-        .and_then(|p| dod::load_dod(FsPath::new(p)));
-    let tasks: Vec<ApiTask> = project
-        .path
-        .as_ref()
-        .map(|p| {
-            scanner::list_tasks(FsPath::new(p))
-                .into_iter()
-                .map(|t| ApiTask {
-                    plan_file: t.plan_file,
-                    task_number: t.task_number,
-                    description: t.description,
-                    source: match t.source {
-                        TaskSource::Manual => "manual",
-                        TaskSource::Git => "git",
-                        TaskSource::Pending => "pending",
-                    }
-                    .to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
+    let all = store
+        .list_active_projects()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let api_project = project_to_api(&project, &all);
     Ok(Json(ApiProjectDetail {
-        project: project_to_api(&project),
-        inbox_note,
-        roadmap: rm.as_ref().map(roadmap_to_api),
-        dod: dod_data.as_ref().map(dod_to_api),
-        research: research.map(|r| ApiResearch {
-            summary: r.summary,
-            previous: r.previous,
-            researched_at: r.researched_at,
-            consecutive_flags: r.consecutive_flags,
-        }),
-        tasks,
+        project: api_project,
+        sunk_cost_days: project.sunk_cost_days,
+        pivot_count: project.pivot_count,
     }))
 }
 
-async fn list_inbox(State(state): State<AppState>) -> Json<Vec<ApiProject>> {
-    let store = state.lock().unwrap();
-    let projects = store.list_inbox_projects().unwrap_or_default();
-    Json(projects.iter().map(project_to_api).collect())
-}
-
-async fn get_next(State(state): State<AppState>) -> Json<ApiNextRecommendation> {
-    let store = state.lock().unwrap();
-    let mut projects = store.list_active_projects().unwrap_or_default();
-    drop(store);
-
-    let today = Local::now().date_naive();
-    projects.sort_by(|a, b| b.priority_score(today).cmp(&a.priority_score(today)));
-
-    match projects.first() {
-        Some(p) => Json(ApiNextRecommendation {
-            project: Some(project_to_api(p)),
-            reason: format!(
-                "Highest priority score ({}), {}% ready, {} days since last activity",
-                p.priority_score(today),
-                p.readiness,
-                (today - p.last_activity).num_days()
-            ),
-        }),
-        None => Json(ApiNextRecommendation {
-            project: None,
-            reason: "No active projects found.".to_string(),
-        }),
-    }
-}
-
-async fn list_parked(State(state): State<AppState>) -> Json<Vec<ApiProject>> {
-    let store = state.lock().unwrap();
-    let all = store.list_projects_for_dedupe().unwrap_or_default();
-    let parked: Vec<_> = all
+async fn list_archived(
+    State(store): State<AppState>,
+) -> Result<Json<Vec<ApiProject>>, StatusCode> {
+    let store = store.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let projects = store
+        .list_archived_projects()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let api_projects: Vec<ApiProject> = projects
         .iter()
-        .filter(|p| p.state == ProjectState::Parked)
-        .map(project_to_api)
+        .map(|p| project_to_api(p, &projects))
         .collect();
-    Json(parked)
+    Ok(Json(api_projects))
 }
 
-async fn list_trash(State(state): State<AppState>) -> Json<Vec<ApiProject>> {
-    let store = state.lock().unwrap();
-    let projects = store.list_deleted_projects().unwrap_or_default();
-    Json(projects.iter().map(project_to_api).collect())
-}
+async fn get_next(
+    State(store): State<AppState>,
+) -> Result<Json<ApiNextRecommendation>, StatusCode> {
+    let store = store.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let projects = store
+        .list_active_projects()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let today = Local::now().date_naive();
 
-#[derive(Serialize)]
-struct ApiPipelineProject {
-    id: i64,
-    name: String,
-    project_type: String,
-    readiness: u8,
-    priority_score: i32,
-    milestones: Vec<ApiPipelineMilestone>,
-}
+    let best = projects
+        .iter()
+        .max_by_key(|p| p.priority_score(today));
 
-#[derive(Serialize)]
-struct ApiPipelineMilestone {
-    name: String,
-    progress: f64,
-    target: Option<String>,
-}
-
-async fn pipeline_projects(State(state): State<AppState>) -> Json<Vec<ApiPipelineProject>> {
-    let store = state.lock().unwrap();
-    let mut projects = store.list_active_projects().unwrap_or_default();
-    drop(store);
-
-    let today = chrono::Local::now().date_naive();
-
-    let result: Vec<ApiPipelineProject> = projects.iter_mut().map(|p| {
-        // Enrich with live readiness
-        if let Some(ref path) = p.path {
-            let project_path = FsPath::new(path);
-            if let Some(scores) = roadmap::load_scores(project_path) {
-                p.readiness = scores.readiness;
-            } else if let Some(mf) = crate::milestones::load_milestones(project_path) {
-                p.readiness = mf.readiness();
-            }
+    match best {
+        Some(p) => {
+            let action = p.action_recommendation(None);
+            Ok(Json(ApiNextRecommendation {
+                project: Some(project_to_api(p, &projects)),
+                reason: format!("Highest score ({}), action: {}", p.priority_score(today), action.label()),
+            }))
         }
-
-        // Load milestones
-        let milestones = p.path.as_ref()
-            .and_then(|path| crate::milestones::load_milestones(FsPath::new(path)))
-            .map(|mf| {
-                mf.milestones.iter().map(|m| {
-                    let total = m.items.len();
-                    let done = m.items.iter().filter(|i| i.done).count();
-                    let progress = if total > 0 { done as f64 / total as f64 } else { 0.0 };
-                    ApiPipelineMilestone {
-                        name: m.name.clone(),
-                        progress,
-                        target: m.target.clone(),
-                    }
-                }).collect()
-            })
-            .unwrap_or_default();
-
-        ApiPipelineProject {
-            id: p.id,
-            name: p.name.clone(),
-            project_type: p.project_type.as_str().to_string(),
-            readiness: p.readiness,
-            priority_score: p.priority_score(today),
-            milestones,
-        }
-    }).collect();
-
-    Json(result)
-}
-
-pub fn api_router(state: AppState) -> Router {
-    Router::new()
-        .route("/api/projects", get(list_projects))
-        .route("/api/projects/:id", get(get_project))
-        .route("/api/inbox", get(list_inbox))
-        .route("/api/next", get(get_next))
-        .route("/api/parked", get(list_parked))
-        .route("/api/trash", get(list_trash))
-        .route("/api/pipeline", get(pipeline_projects))
-        .with_state(state)
-}
-
-pub async fn serve(state: AppState, port: u16) {
-    use tower_http::services::{ServeDir, ServeFile};
-
-    let web_dir = std::env::current_dir()
-        .unwrap_or_default()
-        .join("web")
-        .join("dist");
-
-    let app = if web_dir.exists() {
-        let fallback = ServeFile::new(web_dir.join("index.html"));
-        let serve_dir = ServeDir::new(&web_dir).fallback(fallback);
-        api_router(state).fallback_service(serve_dir)
-    } else {
-        eprintln!("No web/dist/ found, serving API only. Run: cd web && npm run build");
-        api_router(state)
-    };
-
-    let addr = format!("0.0.0.0:{}", port);
-    println!("pm dashboard at http://localhost:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+        None => Ok(Json(ApiNextRecommendation {
+            project: None,
+            reason: "No active projects".to_string(),
+        })),
+    }
 }

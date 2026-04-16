@@ -1,71 +1,79 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectType {
-    Product,
+    Oss,
+    Research,
     Game,
     Webapp,
-    OpenCore,
-    Study,
-    Library,
-    Blog,
 }
 
 impl ProjectType {
     pub fn from_str(s: &str) -> Self {
         match s {
+            "oss" => ProjectType::Oss,
+            "research" => ProjectType::Research,
             "game" => ProjectType::Game,
             "webapp" => ProjectType::Webapp,
-            "open-core" => ProjectType::OpenCore,
-            "study" => ProjectType::Study,
-            "library" => ProjectType::Library,
-            "blog" => ProjectType::Blog,
-            _ => ProjectType::Product,
+            _ => ProjectType::Oss,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            ProjectType::Product => "product",
+            ProjectType::Oss => "oss",
+            ProjectType::Research => "research",
             ProjectType::Game => "game",
             ProjectType::Webapp => "webapp",
-            ProjectType::OpenCore => "open-core",
-            ProjectType::Study => "study",
-            ProjectType::Library => "library",
-            ProjectType::Blog => "blog",
         }
     }
 
     pub fn short(&self) -> &'static str {
         match self {
-            ProjectType::Product => "P",
+            ProjectType::Oss => "O",
+            ProjectType::Research => "R",
             ProjectType::Game => "G",
             ProjectType::Webapp => "W",
-            ProjectType::OpenCore => "OC",
-            ProjectType::Study => "S",
-            ProjectType::Library => "L",
-            ProjectType::Blog => "B",
-        }
-    }
-
-    pub fn weights(&self) -> (i32, i32, i32) {
-        match self {
-            ProjectType::Product => (3, 2, 2),
-            ProjectType::Game =>    (3, 2, 3),
-            ProjectType::Webapp =>  (3, 2, 2),
-            ProjectType::OpenCore =>(3, 1, 3),
-            ProjectType::Study =>   (3, 0, 0),
-            ProjectType::Library => (3, 0, 2),
-            ProjectType::Blog =>    (2, 0, 0),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectState {
-    Inbox,
     Active,
-    Parked,
-    Shipped,
-    Killed,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProjectAction {
+    Push,
+    Pivot,
+    Kill,
+    Groom,
+    Integrate(String),
+    Sustain,
+    Repurpose,
+    Observe,
+}
+
+impl ProjectAction {
+    pub fn label(&self) -> &str {
+        match self {
+            ProjectAction::Push => "PUSH",
+            ProjectAction::Pivot => "PIVOT",
+            ProjectAction::Kill => "KILL",
+            ProjectAction::Groom => "GROOM",
+            ProjectAction::Integrate(_) => "INTEGRATE",
+            ProjectAction::Sustain => "SUSTAIN",
+            ProjectAction::Repurpose => "REPURPOSE",
+            ProjectAction::Observe => "OBSERVE",
+        }
+    }
+
+    pub fn target(&self) -> Option<&str> {
+        match self {
+            ProjectAction::Integrate(name) => Some(name),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -73,9 +81,14 @@ pub struct Project {
     pub id: i64,
     pub name: String,
     pub state: ProjectState,
-    pub impact: u8,
-    pub monetization: u8,
-    pub readiness: u8,
+    pub project_type: ProjectType,
+    pub stage: u8,
+    pub velocity: Option<u8>,
+    pub fit_signal: Option<u8>,
+    pub distinctness: Option<u8>,
+    pub leverage: Option<u8>,
+    pub sunk_cost_days: Option<i32>,
+    pub pivot_count: u32,
     pub last_activity: chrono::NaiveDate,
     pub created_at: chrono::NaiveDate,
     pub soft_deadline: Option<chrono::NaiveDate>,
@@ -83,73 +96,86 @@ pub struct Project {
     pub deleted_at: Option<chrono::NaiveDate>,
     pub duplicate_of: Option<i64>,
     pub possible_duplicate_score: Option<f32>,
-    pub cloneability: Option<u8>,
-    pub uniqueness: Option<u8>,
-    pub defensibility: Option<u8>,
-    pub project_type: ProjectType,
-    pub vibe: Option<u8>,
+}
+
+impl Project {
+    pub fn stage_contribution(&self) -> i32 {
+        self.stage as i32 * 20
+    }
+
+    pub fn mean_axes(&self) -> f32 {
+        let axes = [self.velocity, self.fit_signal, self.distinctness, self.leverage];
+        let (sum, count) = axes.iter().fold((0u32, 0u32), |(s, c), ax| {
+            match ax {
+                Some(v) => (s + *v as u32, c + 1),
+                None => (s, c),
+            }
+        });
+        if count == 0 { 0.0 } else { sum as f32 / count as f32 }
+    }
+
+    pub fn axis_values(&self) -> [Option<u8>; 4] {
+        [self.velocity, self.fit_signal, self.distinctness, self.leverage]
+    }
+
+    pub fn priority_score(&self, today: chrono::NaiveDate) -> i32 {
+        let base = self.stage_contribution() + self.mean_axes() as i32;
+        (base - self.staleness_penalty(today)).max(0)
+    }
+
+    pub fn staleness_penalty(&self, today: chrono::NaiveDate) -> i32 {
+        if self.stage >= 2 {
+            return 0;
+        }
+        let days = (today - self.last_activity).num_days().max(0) as i32;
+        let raw = (days - 30).max(0) / 7;
+        raw.min(10)
+    }
+
+    pub fn action_recommendation(&self, nearest_neighbour: Option<&str>) -> ProjectAction {
+        let fit = self.fit_signal;
+        let vel = self.velocity;
+        let dist = self.distinctness;
+        let lev = self.leverage;
+        let sunk = self.sunk_cost_days.unwrap_or(0);
+
+        if let (Some(f), Some(v)) = (fit, vel) {
+            if f < 3 && v < 3 && sunk > 30 {
+                return ProjectAction::Kill;
+            }
+            if f < 3 && v >= 5 {
+                return ProjectAction::Pivot;
+            }
+            if f >= 6 && v < 3 && self.stage < 4 {
+                return ProjectAction::Groom;
+            }
+            if f >= 6 && v >= 6 && self.stage < 4 {
+                return ProjectAction::Push;
+            }
+        }
+        if let Some(f) = fit {
+            if f >= 6 && self.stage >= 4 {
+                return ProjectAction::Sustain;
+            }
+        }
+        if let Some(d) = dist {
+            if d < 3 {
+                let target = nearest_neighbour.unwrap_or("unknown").to_string();
+                return ProjectAction::Integrate(target);
+            }
+        }
+        if let (Some(l), true) = (lev, sunk > 60) {
+            if l < 3 {
+                return ProjectAction::Repurpose;
+            }
+        }
+        ProjectAction::Observe
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ScanResult {
-    pub total_tasks: usize,
-    pub completed_tasks: usize,
     pub last_commit_date: Option<chrono::NaiveDate>,
-    pub plan_files: Vec<String>,
-    pub has_progress_file: bool,
-    pub charter_filled: Option<(usize, usize)>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TaskSource {
-    Manual,
-    Git,
-    Pending,
-}
-
-#[derive(Debug, Clone)]
-pub struct TaskStatus {
-    pub plan_file: String,
-    pub task_number: usize,
-    pub description: String,
-    pub source: TaskSource,
-}
-
-impl Project {
-    pub fn effective_defensibility(&self) -> u8 {
-        if let Some(d) = self.defensibility {
-            return d;
-        }
-        match (self.uniqueness, self.cloneability) {
-            (Some(u), Some(c)) => u.max(c),
-            (Some(u), None) => u,
-            (None, Some(c)) => c,
-            (None, None) => 5,
-        }
-    }
-
-    /// Effective impact: blends research impact with personal vibe.
-    /// If both set, averages them. If only one, uses that. Default 5.
-    pub fn effective_impact(&self) -> u8 {
-        match (self.impact, self.vibe) {
-            (i, Some(v)) if i != 5 => ((i as u16 + v as u16 + 1) / 2) as u8,
-            (i, None) if i != 5 => i,
-            (_, Some(v)) => v,
-            _ => 5,
-        }
-    }
-
-    pub fn priority_score(&self, today: chrono::NaiveDate) -> i32 {
-        let staleness_days = (today - self.last_activity).num_days() as i32;
-        let staleness_penalty = staleness_days.min(30);
-        let (impact_w, monet_w, def_w) = self.project_type.weights();
-
-        (self.effective_impact() as i32 * impact_w)
-            + (self.monetization as i32 * monet_w)
-            + (self.effective_defensibility() as i32 * def_w)
-            + (self.readiness as i32 / 10 * 4)
-            - staleness_penalty
-    }
 }
 
 #[cfg(test)]
@@ -157,95 +183,158 @@ mod tests {
     use super::*;
     use chrono::NaiveDate;
 
-    fn make_project(impact: u8, monetization: u8, readiness: u8, days_stale: i64) -> Project {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 5).unwrap();
+    fn make_project(stage: u8, velocity: Option<u8>, fit: Option<u8>, dist: Option<u8>, lev: Option<u8>) -> Project {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
         Project {
             id: 1,
             name: "test".to_string(),
             state: ProjectState::Active,
-            impact,
-            monetization,
-            readiness,
-            uniqueness: None,
-            last_activity: today - chrono::Duration::days(days_stale),
-            created_at: today - chrono::Duration::days(30),
+            project_type: ProjectType::Oss,
+            stage,
+            velocity,
+            fit_signal: fit,
+            distinctness: dist,
+            leverage: lev,
+            sunk_cost_days: Some(45),
+            pivot_count: 0,
+            last_activity: today,
+            created_at: today - chrono::Duration::days(90),
             soft_deadline: None,
             path: None,
             deleted_at: None,
             duplicate_of: None,
             possible_duplicate_score: None,
-            cloneability: None,
-            defensibility: None,
-            project_type: ProjectType::Product,
-            vibe: None,
         }
     }
 
     #[test]
-    fn test_priority_score_weights_readiness_highest() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 5).unwrap();
-        let high_readiness = make_project(5, 5, 90, 0);
-        let low_readiness = make_project(5, 5, 20, 0);
-
-        assert!(high_readiness.priority_score(today) > low_readiness.priority_score(today));
-    }
-
-    #[test]
-    fn test_priority_score_penalizes_staleness() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 5).unwrap();
-        let fresh = make_project(5, 5, 50, 0);
-        let stale = make_project(5, 5, 50, 10);
-
-        assert!(fresh.priority_score(today) > stale.priority_score(today));
-    }
-
-    #[test]
-    fn test_priority_score_caps_staleness_penalty() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 5).unwrap();
-        let very_stale = make_project(5, 5, 50, 100);
-
-        let score = very_stale.priority_score(today);
-        assert!(score > 0);
-    }
-
-    fn make_project_def(impact: u8, monetization: u8, readiness: u8, days_stale: i64, defensibility: Option<u8>) -> Project {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
-        Project {
-            id: 1,
-            name: "test".to_string(),
-            state: ProjectState::Active,
-            impact,
-            monetization,
-            readiness,
-            uniqueness: None,
-            last_activity: today - chrono::Duration::days(days_stale),
-            created_at: today - chrono::Duration::days(30),
-            soft_deadline: None,
-            path: None,
-            deleted_at: None,
-            duplicate_of: None,
-            possible_duplicate_score: None,
-            cloneability: None,
-            defensibility,
-            project_type: ProjectType::Product,
-            vibe: None,
+    fn stage_contribution_is_stage_times_twenty() {
+        for s in 0..=5 {
+            let p = make_project(s, None, None, None, None);
+            assert_eq!(p.stage_contribution(), s as i32 * 20);
         }
     }
 
     #[test]
-    fn test_priority_score_includes_defensibility() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
-        let high_def = make_project_def(5, 5, 50, 0, Some(8));
-        let low_def  = make_project_def(5, 5, 50, 0, Some(2));
-        assert!(high_def.priority_score(today) > low_def.priority_score(today));
+    fn mean_axes_averages_non_none() {
+        let p = make_project(0, Some(8), None, Some(6), None);
+        assert!((p.mean_axes() - 7.0).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn test_priority_score_ignores_monetisation_for_study() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 5).unwrap();
-        let product = make_project(5, 10, 50, 0);
-        let mut study = make_project(5, 10, 50, 0);
-        study.project_type = ProjectType::Study;
-        assert!(product.priority_score(today) > study.priority_score(today));
+    fn mean_axes_all_none_returns_zero() {
+        let p = make_project(0, None, None, None, None);
+        assert!((p.mean_axes()).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn priority_score_is_stage_plus_axes() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
+        let p = make_project(3, Some(8), Some(6), Some(7), Some(9));
+        assert_eq!(p.priority_score(today), 67);
+    }
+
+    #[test]
+    fn staleness_penalty_zero_above_stage_two() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
+        let mut p = make_project(2, None, None, None, None);
+        p.last_activity = today - chrono::Duration::days(100);
+        assert_eq!(p.staleness_penalty(today), 0);
+    }
+
+    #[test]
+    fn staleness_penalty_kicks_in_below_stage_two() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
+        let mut p = make_project(1, None, None, None, None);
+        p.last_activity = today - chrono::Duration::days(44);
+        assert_eq!(p.staleness_penalty(today), 2);
+    }
+
+    #[test]
+    fn staleness_penalty_capped_at_ten() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
+        let mut p = make_project(0, None, None, None, None);
+        p.last_activity = today - chrono::Duration::days(365);
+        assert_eq!(p.staleness_penalty(today), 10);
+    }
+
+    #[test]
+    fn action_kill_when_low_fit_low_velocity_high_sunk() {
+        let mut p = make_project(1, Some(2), Some(1), Some(8), Some(5));
+        p.sunk_cost_days = Some(60);
+        assert_eq!(p.action_recommendation(None), ProjectAction::Kill);
+    }
+
+    #[test]
+    fn action_pivot_when_low_fit_but_active() {
+        let p = make_project(1, Some(7), Some(2), Some(8), Some(5));
+        assert_eq!(p.action_recommendation(None), ProjectAction::Pivot);
+    }
+
+    #[test]
+    fn action_integrate_when_low_distinctness() {
+        let p = make_project(2, Some(5), Some(5), Some(2), Some(5));
+        assert_eq!(
+            p.action_recommendation(Some("ward")),
+            ProjectAction::Integrate("ward".to_string())
+        );
+    }
+
+    #[test]
+    fn action_push_when_high_fit_high_velocity_pre_ship() {
+        let p = make_project(2, Some(8), Some(7), Some(8), Some(6));
+        assert_eq!(p.action_recommendation(None), ProjectAction::Push);
+    }
+
+    #[test]
+    fn action_groom_when_high_fit_low_velocity_pre_ship() {
+        let p = make_project(3, Some(1), Some(8), Some(8), Some(6));
+        assert_eq!(p.action_recommendation(None), ProjectAction::Groom);
+    }
+
+    #[test]
+    fn action_sustain_when_high_fit_post_ship() {
+        let p = make_project(4, Some(3), Some(7), Some(8), Some(6));
+        assert_eq!(p.action_recommendation(None), ProjectAction::Sustain);
+    }
+
+    #[test]
+    fn action_repurpose_when_low_leverage_high_sunk() {
+        let mut p = make_project(1, Some(5), Some(5), Some(8), Some(2));
+        p.sunk_cost_days = Some(90);
+        assert_eq!(p.action_recommendation(None), ProjectAction::Repurpose);
+    }
+
+    #[test]
+    fn action_observe_default() {
+        let p = make_project(2, Some(4), Some(4), Some(7), Some(5));
+        assert_eq!(p.action_recommendation(None), ProjectAction::Observe);
+    }
+
+    #[test]
+    fn action_observe_when_axes_unscored() {
+        let p = make_project(1, Some(9), None, Some(8), Some(5));
+        assert_eq!(p.action_recommendation(None), ProjectAction::Observe);
+    }
+
+    #[test]
+    fn action_observe_when_all_none() {
+        let p = make_project(0, None, None, None, None);
+        assert_eq!(p.action_recommendation(None), ProjectAction::Observe);
+    }
+
+    #[test]
+    fn priority_score_clamps_to_zero() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
+        let mut p = make_project(0, None, None, None, None);
+        p.last_activity = today - chrono::Duration::days(365);
+        assert_eq!(p.priority_score(today), 0);
+    }
+
+    #[test]
+    fn project_type_round_trips() {
+        for t in [ProjectType::Oss, ProjectType::Research, ProjectType::Game, ProjectType::Webapp] {
+            assert_eq!(ProjectType::from_str(t.as_str()), t);
+        }
     }
 }

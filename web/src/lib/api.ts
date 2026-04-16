@@ -1,4 +1,4 @@
-import type { Project, ProjectDetail, NextRecommendation, PipelineProject } from "./types";
+import type { Project, ProjectDetail, NextRecommendation } from "./types";
 
 const BASE = "/api";
 
@@ -10,8 +10,5 @@ async function get<T>(path: string): Promise<T> {
 
 export const fetchProjects = () => get<Project[]>("/projects");
 export const fetchProject = (id: number) => get<ProjectDetail>(`/projects/${id}`);
-export const fetchInbox = () => get<Project[]>("/inbox");
+export const fetchArchived = () => get<Project[]>("/archived");
 export const fetchNext = () => get<NextRecommendation>("/next");
-export const fetchParked = () => get<Project[]>("/parked");
-export const fetchTrash = () => get<Project[]>("/trash");
-export const fetchPipeline = () => get<PipelineProject[]>("/pipeline");
