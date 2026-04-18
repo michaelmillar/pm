@@ -43,7 +43,7 @@ fn score_one(store: &Store, project: &Project, all: &[Project], fetch_remote: bo
         }
     }
 
-    let detected_type = detect_project_type(&signals);
+    let detected_type = detect_project_type(&signals, repo);
     if detected_type != ProjectType::Oss && project.project_type == ProjectType::Oss {
         store.update_project_type(project.id, &detected_type)
             .map_err(|e| e.to_string())?;
@@ -64,7 +64,7 @@ fn score_one(store: &Store, project: &Project, all: &[Project], fetch_remote: bo
     Ok(())
 }
 
-fn detect_project_type(signals: &RepoSignals) -> ProjectType {
+fn detect_project_type(signals: &RepoSignals, path: &Path) -> ProjectType {
     if signals.has_game_engine {
         return ProjectType::Game;
     }
@@ -73,6 +73,14 @@ fn detect_project_type(signals: &RepoSignals) -> ProjectType {
     }
     if signals.has_webapp_framework {
         return ProjectType::Webapp;
+    }
+    if let Some(parent) = path.parent() {
+        let parent_name = parent.file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if parent_name == "studying" || parent_name == "learning" {
+            return ProjectType::Study;
+        }
     }
     ProjectType::Oss
 }
@@ -178,24 +186,28 @@ mod tests {
         })), 4);
     }
 
+    fn dummy_path() -> &'static Path {
+        Path::new("/tmp/test-project")
+    }
+
     #[test]
     fn type_game_engine_detected() {
-        assert_eq!(detect_project_type(&signals(|s| s.has_game_engine = true)), ProjectType::Game);
+        assert_eq!(detect_project_type(&signals(|s| s.has_game_engine = true), dummy_path()), ProjectType::Game);
     }
 
     #[test]
     fn type_notebooks_detected_as_research() {
-        assert_eq!(detect_project_type(&signals(|s| s.has_notebooks = true)), ProjectType::Research);
+        assert_eq!(detect_project_type(&signals(|s| s.has_notebooks = true), dummy_path()), ProjectType::Research);
     }
 
     #[test]
     fn type_webapp_framework_detected() {
-        assert_eq!(detect_project_type(&signals(|s| s.has_webapp_framework = true)), ProjectType::Webapp);
+        assert_eq!(detect_project_type(&signals(|s| s.has_webapp_framework = true), dummy_path()), ProjectType::Webapp);
     }
 
     #[test]
     fn type_default_is_oss() {
-        assert_eq!(detect_project_type(&RepoSignals::default()), ProjectType::Oss);
+        assert_eq!(detect_project_type(&RepoSignals::default(), dummy_path()), ProjectType::Oss);
     }
 
     #[test]
@@ -203,6 +215,12 @@ mod tests {
         assert_eq!(detect_project_type(&signals(|s| {
             s.has_game_engine = true;
             s.has_webapp_framework = true;
-        })), ProjectType::Game);
+        }), dummy_path()), ProjectType::Game);
+    }
+
+    #[test]
+    fn type_study_from_parent_dir() {
+        let path = Path::new("/home/user/projects/studying/some-repo");
+        assert_eq!(detect_project_type(&RepoSignals::default(), path), ProjectType::Study);
     }
 }

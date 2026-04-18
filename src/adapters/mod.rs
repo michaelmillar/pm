@@ -17,6 +17,7 @@ pub fn fetch_fit_signal(project: &Project) -> Option<FitSignalResult> {
         ProjectType::Research => research::fetch_fit(project),
         ProjectType::Game => steam::fetch_fit(project),
         ProjectType::Webapp => analytics::fetch_fit(project),
+        ProjectType::Study => None,
     }
 }
 

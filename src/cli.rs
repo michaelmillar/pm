@@ -198,6 +198,7 @@ fn archetype_icon(type_str: &str) -> &'static str {
         "research" => "\u{2234}",
         "game" => "\u{265E}",
         "webapp" => "\u{25C8}",
+        "study" => "\u{270E}",
         _ => " ",
     }
 }

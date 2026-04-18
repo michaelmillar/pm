@@ -539,9 +539,10 @@ impl Store {
             .unwrap_or_else(|| "oss".to_string());
         let project_type = match type_str.as_str() {
             "oss" | "library" | "open-core" | "personal-tool" => ProjectType::Oss,
-            "research" | "study" => ProjectType::Research,
+            "research" => ProjectType::Research,
             "game" | "games" => ProjectType::Game,
             "webapp" | "product" | "consumer-app" | "blog" => ProjectType::Webapp,
+            "study" | "learning" => ProjectType::Study,
             _ => ProjectType::from_str(&type_str),
         };
 

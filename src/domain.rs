@@ -4,6 +4,7 @@ pub enum ProjectType {
     Research,
     Game,
     Webapp,
+    Study,
 }
 
 impl ProjectType {
@@ -13,6 +14,7 @@ impl ProjectType {
             "research" => ProjectType::Research,
             "game" => ProjectType::Game,
             "webapp" => ProjectType::Webapp,
+            "study" => ProjectType::Study,
             _ => ProjectType::Oss,
         }
     }
@@ -23,6 +25,7 @@ impl ProjectType {
             ProjectType::Research => "research",
             ProjectType::Game => "game",
             ProjectType::Webapp => "webapp",
+            ProjectType::Study => "study",
         }
     }
 
@@ -32,6 +35,7 @@ impl ProjectType {
             ProjectType::Research => "R",
             ProjectType::Game => "G",
             ProjectType::Webapp => "W",
+            ProjectType::Study => "S",
         }
     }
 
@@ -41,6 +45,7 @@ impl ProjectType {
             ProjectType::Research => "Research",
             ProjectType::Game => "Game",
             ProjectType::Webapp => "Webapp",
+            ProjectType::Study => "Study",
         }
     }
 }
@@ -448,7 +453,7 @@ mod tests {
 
     #[test]
     fn project_type_round_trips() {
-        for t in [ProjectType::Oss, ProjectType::Research, ProjectType::Game, ProjectType::Webapp] {
+        for t in [ProjectType::Oss, ProjectType::Research, ProjectType::Game, ProjectType::Webapp, ProjectType::Study] {
             assert_eq!(ProjectType::from_str(t.as_str()), t);
         }
     }
