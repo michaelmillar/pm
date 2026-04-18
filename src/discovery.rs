@@ -22,16 +22,8 @@ const DEFAULT_IGNORED_FOLDERS: &[&str] = &[
 
 pub fn discover_projects(store: &Store, root: &Path) -> Result<(), Box<dyn Error>> {
     let existing_projects = store.list_projects_for_dedupe()?;
-    let entries = std::fs::read_dir(root)?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        if !path.join(".git").is_dir() {
-            continue;
-        }
-
+    let repos = find_git_repos(root);
+    for path in &repos {
         let name = match path.file_name() {
             Some(n) => n.to_string_lossy().to_string(),
             None => continue,
@@ -112,6 +104,38 @@ pub fn list_nonrepo_folders(root: &Path) -> Vec<String> {
 
     results.sort();
     results
+}
+
+fn find_git_repos(root: &Path) -> Vec<std::path::PathBuf> {
+    let ignored: HashSet<&str> = DEFAULT_IGNORED_FOLDERS.iter().copied().collect();
+    let mut repos = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = match path.file_name() {
+                Some(n) => n.to_string_lossy().to_string(),
+                None => continue,
+            };
+            if ignored.contains(name.as_str()) {
+                continue;
+            }
+            if path.join(".git").is_dir() {
+                repos.push(path);
+            } else {
+                stack.push(path);
+            }
+        }
+    }
+    repos.sort();
+    repos
 }
 
 #[derive(Debug, Default)]
