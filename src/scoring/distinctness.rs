@@ -123,6 +123,7 @@ mod tests {
             possible_duplicate_score: None,
             research_summary: None,
             inbox_note: None,
+            next_task: None,
         }
     }
 

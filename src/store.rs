@@ -25,7 +25,7 @@ pub struct PivotEvent {
 const PROJECT_COLUMNS: &str =
     "id, name, state, project_type, stage, velocity, fit_signal, distinctness, leverage, \
      sunk_cost_days, pivot_count, last_activity, created_at, soft_deadline, path, \
-     deleted_at, duplicate_of, possible_duplicate_score, research_summary, inbox_note";
+     deleted_at, duplicate_of, possible_duplicate_score, research_summary, inbox_note, next_task";
 
 impl Store {
     pub fn open(path: &std::path::Path) -> Result<Self> {
@@ -69,7 +69,8 @@ impl Store {
                 duplicate_of INTEGER,
                 possible_duplicate_score REAL,
                 research_summary TEXT,
-                inbox_note TEXT
+                inbox_note TEXT,
+                next_task TEXT
             );
 
             CREATE TABLE IF NOT EXISTS stage_events (
@@ -102,6 +103,7 @@ impl Store {
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN duplicate_of INTEGER", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN possible_duplicate_score REAL", []);
         let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN soft_deadline TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE projects ADD COLUMN next_task TEXT", []);
 
         Ok(())
     }
@@ -247,6 +249,13 @@ impl Store {
         self.conn.execute(
             "UPDATE projects SET sunk_cost_days = ?1 WHERE id = ?2",
             params![days, id],
+        )
+    }
+
+    pub fn update_next_task(&self, id: i64, next_task: Option<&str>) -> Result<usize> {
+        self.conn.execute(
+            "UPDATE projects SET next_task = ?1 WHERE id = ?2",
+            params![next_task, id],
         )
     }
 
@@ -572,6 +581,7 @@ impl Store {
             possible_duplicate_score: row.get(17)?,
             research_summary: row.get(18)?,
             inbox_note: row.get(19)?,
+            next_task: row.get(20)?,
         })
     }
 }

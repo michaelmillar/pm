@@ -6,6 +6,7 @@ pub mod cli_core;
 pub mod discovery;
 pub mod domain;
 pub mod naming;
+pub mod next_task;
 pub mod scanner;
 pub mod scoring;
 pub mod similarity;

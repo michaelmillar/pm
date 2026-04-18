@@ -33,6 +33,8 @@ pub struct ApiProject {
     pub created_at: String,
     pub soft_deadline: Option<String>,
     pub path: Option<String>,
+    pub next_task: Option<String>,
+    pub next_task_source: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -99,6 +101,7 @@ fn project_to_api(p: &crate::domain::Project, all_projects: &[crate::domain::Pro
 
     let nearest = find_nearest_neighbour(p, all_projects);
     let action = p.action_recommendation(nearest.as_deref());
+    let next = crate::next_task::resolve(p, &action);
 
     ApiProject {
         id: p.id,
@@ -122,6 +125,8 @@ fn project_to_api(p: &crate::domain::Project, all_projects: &[crate::domain::Pro
         created_at: p.created_at.to_string(),
         soft_deadline: p.soft_deadline.map(|d| d.to_string()),
         path: p.path.clone(),
+        next_task: next.as_ref().map(|n| n.text.clone()),
+        next_task_source: next.as_ref().map(|n| n.source.to_string()),
     }
 }
 

@@ -142,6 +142,33 @@ fn count_git_tags(path: &Path) -> (bool, usize) {
     }
 }
 
+pub fn extract_next_task(repo: &Path) -> Option<String> {
+    for fname in ["PLAN.md", "TODO.md", "ROADMAP.md", "plan.md", "todo.md", "roadmap.md"] {
+        let p = repo.join(fname);
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(item) = first_unchecked_item(&content) {
+                return Some(item);
+            }
+        }
+    }
+    None
+}
+
+fn first_unchecked_item(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("- [ ]") || lower.starts_with("* [ ]") {
+            let rest = trimmed[5..].trim();
+            if !rest.is_empty() {
+                let truncated: String = rest.chars().take(120).collect();
+                return Some(truncated);
+            }
+        }
+    }
+    None
+}
+
 fn count_contributors(path: &Path) -> usize {
     let output = Command::new("git")
         .args(["shortlog", "-sn", "--no-merges", "HEAD"])

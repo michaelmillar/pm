@@ -151,6 +151,7 @@ pub struct Project {
     pub possible_duplicate_score: Option<f32>,
     pub research_summary: Option<String>,
     pub inbox_note: Option<String>,
+    pub next_task: Option<String>,
 }
 
 impl Project {
@@ -302,6 +303,7 @@ mod tests {
             possible_duplicate_score: None,
             research_summary: None,
             inbox_note: None,
+            next_task: None,
         }
     }
 

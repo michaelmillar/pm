@@ -91,6 +91,14 @@ enum Commands {
     Calibrate,
     /// Show highest-priority project
     Next,
+    /// Set or clear the next-task note on a project
+    Task {
+        id: i64,
+        /// Manual next-task text (omit with --clear to remove)
+        text: Option<String>,
+        #[arg(long, conflicts_with = "text")]
+        clear: bool,
+    },
     /// List deleted projects
     Trash,
     /// Restore a deleted project
@@ -146,6 +154,7 @@ pub fn run() {
         Commands::Calibrate => cmd_calibrate(&store),
         Commands::Migrate => cmd_migrate(&store),
         Commands::Next => cmd_next(&store),
+        Commands::Task { id, text, clear } => cmd_task(&store, id, text, clear),
         Commands::Trash => cmd_trash(&store),
         Commands::Restore { id } => cmd_restore(&store, id),
     }
@@ -248,10 +257,10 @@ fn cmd_status(store: &Store, sort: StatusSort, show_all: bool) {
     let reset = "\x1b[0m";
     let bold = "\x1b[1m";
 
-    println!("{bold}{:>4}  {:<13} {:>5}  {:<25} {:<10} {:>4} {:>4} {:>4} {:>4} {:>5}{reset}",
+    println!("{bold}{:>4}  {:<13} {:>5}  {:<25} {:<10} {:>4} {:>4} {:>4} {:>4} {:>5}  {:<40}{reset}",
         "ID", "Action", "Score", "Project", "Type",
-        "Vel", "Fit", "Dst", "Lev", "Stale");
-    println!("{dim}{}{reset}", "\u{2500}".repeat(84));
+        "Vel", "Fit", "Dst", "Lev", "Stale", "Next");
+    println!("{dim}{}{reset}", "\u{2500}".repeat(126));
 
     let mut last_stage: Option<u8> = None;
     for (p, score, action) in &scored {
@@ -277,7 +286,13 @@ fn cmd_status(store: &Store, sort: StatusSort, show_all: bool) {
             }
         };
 
-        println!("{:>4}  {:<22} {:>5}  {:<25} {:<10} {} {} {} {} {:>4}d",
+        let next = crate::next_task::resolve(p, action);
+        let next_col = match &next {
+            Some(n) => truncate(&n.text, 40),
+            None => String::new(),
+        };
+
+        println!("{:>4}  {:<22} {:>5}  {:<25} {:<10} {} {} {} {} {:>4}d  {}",
             p.id,
             act,
             score,
@@ -288,6 +303,7 @@ fn cmd_status(store: &Store, sort: StatusSort, show_all: bool) {
             fmt_ax(p.distinctness),
             fmt_ax(p.leverage),
             days_stale,
+            next_col,
         );
     }
 
@@ -468,6 +484,30 @@ fn cmd_pivot(store: &Store, id: i64, reason: Option<String>) {
     store.record_stage_event(id, old_stage, 1, Some("pivot")).unwrap();
     println!("Pivoted '{}'. Stage reset to 1 (spike). Pivot count: {}",
         project.name, project.pivot_count + 1);
+}
+
+fn cmd_task(store: &Store, id: i64, text: Option<String>, clear: bool) {
+    let project = match store.get_project(id).unwrap() {
+        Some(p) => p,
+        None => { println!("Project {} not found", id); return; }
+    };
+    if clear {
+        store.update_next_task(id, None).unwrap();
+        println!("Cleared next task for '{}'", project.name);
+        return;
+    }
+    match text {
+        Some(t) => {
+            store.update_next_task(id, Some(&t)).unwrap();
+            println!("Set next task for '{}': {}", project.name, t);
+        }
+        None => {
+            match &project.next_task {
+                Some(t) => println!("{}: {}", project.name, t),
+                None => println!("{}: (no manual task set)", project.name),
+            }
+        }
+    }
 }
 
 fn cmd_calibrate(store: &Store) {
