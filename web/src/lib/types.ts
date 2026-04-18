@@ -28,3 +28,14 @@ export interface NextRecommendation {
   project: Project | null;
   reason: string;
 }
+
+export interface PortfolioStats {
+  total: number;
+  scored: number;
+  unscored: number;
+  avg_score: number;
+  avg_staleness: number;
+  by_stage: { label: string; count: number }[];
+  by_action: { action: string; count: number }[];
+  score_distribution: { min: number; max: number; count: number }[];
+}

@@ -153,7 +153,7 @@ td.name-cell {
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
 
 .name-col {
@@ -610,5 +610,266 @@ td.name-cell {
 
   td, thead th {
     padding: 0.3rem 0.4rem;
+  }
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  border: 1px solid var(--border);
+  padding: 1rem 1.25rem;
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: system-ui, -apple-system, sans-serif;
+  margin-bottom: 0.3rem;
+}
+
+.stat-value {
+  font-family: "Iosevka Term", "Cascadia Code", "SF Mono", monospace;
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.stat-sub {
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  font-family: system-ui, -apple-system, sans-serif;
+  margin-top: 0.25rem;
+}
+
+.view-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.view-toggle {
+  display: flex;
+  gap: 0;
+}
+
+.show-all-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.show-all-toggle input {
+  cursor: pointer;
+}
+
+.view-toggle button {
+  padding: 0.35rem 1rem;
+  font-size: 0.82rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.view-toggle button:first-child { border-radius: 3px 0 0 3px; }
+.view-toggle button:last-child { border-radius: 0 3px 3px 0; }
+.view-toggle button:not(:first-child) { border-left: none; }
+
+.view-toggle button.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.project-card {
+  border: 1px solid var(--border);
+  padding: 1rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.project-card:hover {
+  background: var(--accent-soft);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.action-pill {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.score-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.score-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--border-light);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.score-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.score-num {
+  font-family: "Iosevka Term", "Cascadia Code", "SF Mono", monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  min-width: 1.8rem;
+  text-align: right;
+}
+
+.axes-mini {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.axis-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.axis-mini-label {
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  font-family: system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.axis-mini-bar {
+  height: 3px;
+  background: var(--border-light);
+  border-radius: 1.5px;
+  overflow: hidden;
+}
+
+.axis-mini-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 1.5px;
+}
+
+.axis-mini-bar.missing {
+  border: 1px dashed var(--border);
+  background: none;
+  height: 3px;
+}
+
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.chart-card {
+  border: 1px solid var(--border);
+  padding: 1.25rem;
+}
+
+.chart-card h3 {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+}
+
+.action-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.action-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.action-count {
+  font-family: "Iosevka Term", "Cascadia Code", "SF Mono", monospace;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .charts-row {
+    grid-template-columns: 1fr;
   }
 }

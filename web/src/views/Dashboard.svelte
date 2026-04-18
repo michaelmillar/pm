@@ -1,10 +1,17 @@
 <script lang="ts">
-  import { fetchProjects } from "../lib/api";
+  import { fetchProjects, fetchStats } from "../lib/api";
   import type { Project } from "../lib/types";
+  import type { PortfolioStats } from "../lib/types";
   import ProjectIcon from "../lib/ProjectIcon.svelte";
+  import StatsCards from "../lib/StatsCards.svelte";
+  import ProjectCard from "../lib/ProjectCard.svelte";
+  import PortfolioCharts from "../lib/PortfolioCharts.svelte";
 
   let projects: Project[] = $state([]);
+  let stats: PortfolioStats | null = $state(null);
   let loading = $state(true);
+  let view: "table" | "grid" | "charts" = $state("table");
+  let showAll = $state(false);
   let sortKey: keyof Project = $state("score");
   let sortAsc = $state(false);
 
@@ -22,12 +29,23 @@
     })
   );
 
-  $effect(() => {
-    fetchProjects().then((data) => {
-      projects = data;
+  function load() {
+    loading = true;
+    Promise.all([fetchProjects(showAll), fetchStats()]).then(([p, s]) => {
+      projects = p;
+      stats = s;
       loading = false;
     });
+  }
+
+  $effect(() => {
+    load();
   });
+
+  function toggleShowAll() {
+    showAll = !showAll;
+    load();
+  }
 
   function toggleSort(key: keyof Project) {
     if (sortKey === key) {
@@ -73,61 +91,85 @@
     { key: "stage_label", label: "Stage", numeric: false },
     { key: "score", label: "Score", numeric: true },
     { key: "action", label: "Action", numeric: false },
-    { key: "velocity", label: "V", numeric: true },
-    { key: "fit_signal", label: "F", numeric: true },
-    { key: "distinctness", label: "D", numeric: true },
-    { key: "leverage", label: "L", numeric: true },
+    { key: "velocity", label: "Velocity", numeric: true },
+    { key: "fit_signal", label: "Fit", numeric: true },
+    { key: "distinctness", label: "Distinct", numeric: true },
+    { key: "leverage", label: "Leverage", numeric: true },
     { key: "days_stale", label: "Stale", numeric: true },
   ];
 </script>
-
-<p class="eyebrow">Active projects</p>
 
 {#if loading}
   <div class="loading">Loading...</div>
 {:else if projects.length === 0}
   <div class="empty-state">No active projects. Add one with <code>pm add</code>.</div>
 {:else}
-  <table>
-    <thead>
-      <tr>
-        {#each columns as col}
-          <th
-            class:sorted={sortKey === col.key}
-            onclick={() => toggleSort(col.key)}
-          >
-            {col.label}{sortIndicator(col.key)}
-          </th>
-        {/each}
-      </tr>
-    </thead>
-    <tbody>
-      {#each sorted as p}
-        <tr onclick={() => (window.location.hash = `#/project/${p.id}`)}>
-          <td class="name-cell">
-            <ProjectIcon name={p.name} size={22} />
-            <span class="name-col">
-              <span class="project-name">{p.name}</span>
-            </span>
-          </td>
-          <td><span class="type-badge">{p.archetype}</span></td>
-          <td>{p.stage_label}</td>
-          <td class="num">{p.score}</td>
-          <td>
-            <span class="action-pill" style="color: {actionColour(p.action)}">
-              {p.action}
-            </span>
-            {#if p.action_target}
-              <span class="action-target">&rarr; {p.action_target}</span>
-            {/if}
-          </td>
-          <td class="num">{axisDisplay(p.velocity)}</td>
-          <td class="num">{axisDisplay(p.fit_signal)}</td>
-          <td class="num">{axisDisplay(p.distinctness)}</td>
-          <td class="num">{axisDisplay(p.leverage)}</td>
-          <td class="num" style="color: {staleColour(p.days_stale)}">{p.days_stale}d</td>
+  {#if stats}
+    <StatsCards {stats} />
+  {/if}
+
+  <div class="view-controls">
+    <div class="view-toggle">
+      <button class:active={view === "table"} onclick={() => (view = "table")}>Table</button>
+      <button class:active={view === "grid"} onclick={() => (view = "grid")}>Grid</button>
+      <button class:active={view === "charts"} onclick={() => (view = "charts")}>Charts</button>
+    </div>
+    <label class="show-all-toggle">
+      <input type="checkbox" checked={showAll} onchange={toggleShowAll} />
+      Show unscored
+    </label>
+  </div>
+
+  {#if view === "table"}
+    <table>
+      <thead>
+        <tr>
+          {#each columns as col}
+            <th
+              class:sorted={sortKey === col.key}
+              onclick={() => toggleSort(col.key)}
+            >
+              {col.label}{sortIndicator(col.key)}
+            </th>
+          {/each}
         </tr>
+      </thead>
+      <tbody>
+        {#each sorted as p}
+          <tr onclick={() => (window.location.hash = `#/project/${p.id}`)}>
+            <td class="name-cell">
+              <ProjectIcon name={p.name} size={32} />
+              <span class="name-col">
+                <span class="project-name">{p.name}</span>
+              </span>
+            </td>
+            <td><span class="type-badge">{p.archetype}</span></td>
+            <td>{p.stage_label}</td>
+            <td class="num">{p.score}</td>
+            <td>
+              <span class="action-pill" style="color: {actionColour(p.action)}">
+                {p.action}
+              </span>
+              {#if p.action_target}
+                <span class="action-target">&rarr; {p.action_target}</span>
+              {/if}
+            </td>
+            <td class="num">{axisDisplay(p.velocity)}</td>
+            <td class="num">{axisDisplay(p.fit_signal)}</td>
+            <td class="num">{axisDisplay(p.distinctness)}</td>
+            <td class="num">{axisDisplay(p.leverage)}</td>
+            <td class="num" style="color: {staleColour(p.days_stale)}">{p.days_stale}d</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {:else if view === "grid"}
+    <div class="project-grid">
+      {#each sorted as p}
+        <ProjectCard project={p} />
       {/each}
-    </tbody>
-  </table>
+    </div>
+  {:else if view === "charts" && stats}
+    <PortfolioCharts {stats} />
+  {/if}
 {/if}

@@ -1,4 +1,4 @@
-import type { Project, ProjectDetail, NextRecommendation } from "./types";
+import type { Project, ProjectDetail, NextRecommendation, PortfolioStats } from "./types";
 
 const BASE = "/api";
 
@@ -8,7 +8,8 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
-export const fetchProjects = () => get<Project[]>("/projects");
+export const fetchProjects = (all = false) => get<Project[]>(`/projects${all ? "?all=true" : ""}`);
 export const fetchProject = (id: number) => get<ProjectDetail>(`/projects/${id}`);
 export const fetchArchived = () => get<Project[]>("/archived");
 export const fetchNext = () => get<NextRecommendation>("/next");
+export const fetchStats = () => get<PortfolioStats>("/stats");
