@@ -141,7 +141,7 @@ fn find_nearest_neighbour(target: &crate::domain::Project, all: &[crate::domain:
 pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/projects", get(list_projects))
-        .route("/projects/{id}", get(get_project_detail))
+        .route("/projects/:id", get(get_project_detail))
         .route("/archived", get(list_archived))
         .route("/next", get(get_next))
         .route("/stats", get(get_stats))
