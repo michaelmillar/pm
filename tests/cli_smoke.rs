@@ -12,7 +12,7 @@ fn test_pm_add_and_status() {
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("pm"));
     cmd.env("PM_DATA_DIR", tmp.path());
-    cmd.arg("status");
+    cmd.args(["status", "--all"]);
     cmd.assert().success()
         .stdout(predicate::str::contains("Test Project"));
 }
@@ -28,10 +28,10 @@ fn test_status_shows_new_columns() {
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("pm"));
     cmd.env("PM_DATA_DIR", tmp.path());
-    cmd.arg("status");
+    cmd.args(["status", "--all"]);
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("#"))
+        .stdout(predicate::str::contains("ID"))
         .stdout(predicate::str::contains("Action"))
         .stdout(predicate::str::contains("Score"))
         .stdout(predicate::str::contains("Alpha Project"));
@@ -48,7 +48,7 @@ fn test_status_accepts_sort_flag() {
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("pm"));
     cmd.env("PM_DATA_DIR", tmp.path());
-    cmd.args(["status", "--sort", "name"]);
+    cmd.args(["status", "--sort", "name", "--all"]);
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Alpha Project"));

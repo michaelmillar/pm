@@ -20,6 +20,8 @@ enum Commands {
     Status {
         #[arg(long, value_enum, default_value_t = StatusSort::Score)]
         sort: StatusSort,
+        #[arg(long, help = "Include unscored projects (score = 0)")]
+        all: bool,
     },
     /// Add a new project
     Add {
@@ -33,18 +35,20 @@ enum Commands {
     Show {
         id: i64,
     },
-    /// Soft-delete a project (recoverable for 30 days)
+    /// Soft-delete projects (recoverable for 30 days)
     Remove {
-        id: i64,
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<i64>,
     },
     /// Rename a project
     Rename {
         id: i64,
         name: String,
     },
-    /// Archive a project (move to archived state)
+    /// Archive projects (move to archived state)
     Archive {
-        id: i64,
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<i64>,
     },
     /// Reactivate an archived project
     Activate {
@@ -126,12 +130,12 @@ pub fn run() {
     let store = open_store();
 
     match cli.command {
-        Commands::Status { sort } => cmd_status(&store, sort),
+        Commands::Status { sort, all } => cmd_status(&store, sort, all),
         Commands::Add { name, path, r#type } => cmd_add(&store, &name, path, r#type),
         Commands::Show { id } => cmd_show(&store, id),
-        Commands::Remove { id } => cmd_remove(&store, id),
+        Commands::Remove { ids } => cmd_remove(&store, &ids),
         Commands::Rename { id, name } => cmd_rename(&store, id, &name),
-        Commands::Archive { id } => cmd_archive(&store, id),
+        Commands::Archive { ids } => cmd_archive(&store, &ids),
         Commands::Activate { id } => cmd_activate(&store, id),
         Commands::Type { id, project_type } => cmd_type(&store, id, project_type),
         Commands::Score { id, axis, stage } => cmd_score(&store, id, axis, stage),
@@ -188,17 +192,17 @@ fn action_icon(action: &str) -> &'static str {
     }
 }
 
-fn archetype_icon(short: &str) -> &'static str {
-    match short {
-        "O" => "\u{2699}",
-        "R" => "\u{2234}",
-        "G" => "\u{265E}",
-        "W" => "\u{25C8}",
+fn archetype_icon(type_str: &str) -> &'static str {
+    match type_str {
+        "oss" => "\u{2699}",
+        "research" => "\u{2234}",
+        "game" => "\u{265E}",
+        "webapp" => "\u{25C8}",
         _ => " ",
     }
 }
 
-fn cmd_status(store: &Store, sort: StatusSort) {
+fn cmd_status(store: &Store, sort: StatusSort, show_all: bool) {
     let projects = store.list_active_projects().unwrap();
     if projects.is_empty() {
         println!("No active projects. Add one with: pm add \"project name\"");
@@ -207,74 +211,87 @@ fn cmd_status(store: &Store, sort: StatusSort) {
 
     let today = Local::now().date_naive();
     let thresholds = store.load_thresholds().unwrap_or_default();
-    let mut scored: Vec<_> = projects.iter().map(|p| {
+    let all_scored: Vec<_> = projects.iter().map(|p| {
         let action = p.action_with_thresholds(&thresholds, None);
         let score = p.priority_score(today);
         (p, score, action)
     }).collect();
 
-    scored.sort_by(|a, b| {
-        b.0.stage.cmp(&a.0.stage)
-            .then(b.1.cmp(&a.1))
-            .then((today - a.0.last_activity).num_days().cmp(&(today - b.0.last_activity).num_days()))
-    });
+    let hidden = all_scored.iter().filter(|(_, s, _)| *s == 0).count();
+    let mut scored: Vec<_> = if show_all {
+        all_scored
+    } else {
+        all_scored.into_iter().filter(|(_, s, _)| *s > 0).collect()
+    };
 
     match sort {
-        StatusSort::Score => scored.sort_by(|a, b| b.1.cmp(&a.1)),
+        StatusSort::Score => scored.sort_by(|a, b| {
+            b.0.stage.cmp(&a.0.stage)
+                .then(b.1.cmp(&a.1))
+        }),
         StatusSort::Stale => scored.sort_by(|a, b| {
             let da = (today - a.0.last_activity).num_days();
             let db = (today - b.0.last_activity).num_days();
-            db.cmp(&da)
+            b.0.stage.cmp(&a.0.stage).then(db.cmp(&da))
         }),
-        StatusSort::Name => scored.sort_by(|a, b| a.0.name.cmp(&b.0.name)),
-        StatusSort::Stage => {}
+        StatusSort::Name => scored.sort_by(|a, b| {
+            b.0.stage.cmp(&a.0.stage).then(a.0.name.cmp(&b.0.name))
+        }),
+        StatusSort::Stage => scored.sort_by(|a, b| {
+            b.0.stage.cmp(&a.0.stage)
+                .then(b.1.cmp(&a.1))
+        }),
     }
 
     let dim = "\x1b[90m";
     let reset = "\x1b[0m";
     let bold = "\x1b[1m";
 
-    println!("{bold}{:>3}  {:<13} {:>5}  {:<26} {:<6} {:>8} {:>5} {:>10} {:>8} {:>5}{reset}",
-        "#", "Action", "Score", "Project", "Type",
-        "Velocity", "Fit", "Distinct", "Leverage", "Stale");
-    println!("{dim}{}{reset}", "\u{2500}".repeat(98));
+    println!("{bold}{:>4}  {:<13} {:>5}  {:<25} {:<10} {:>4} {:>4} {:>4} {:>4} {:>5}{reset}",
+        "ID", "Action", "Score", "Project", "Type",
+        "Vel", "Fit", "Dst", "Lev", "Stale");
+    println!("{dim}{}{reset}", "\u{2500}".repeat(84));
 
     let mut last_stage: Option<u8> = None;
-    for (rank, (p, score, action)) in scored.iter().enumerate() {
+    for (p, score, action) in &scored {
         if last_stage != Some(p.stage) {
             if last_stage.is_some() {
                 println!();
             }
             let count = scored.iter().filter(|(proj, _, _)| proj.stage == p.stage).count();
             println!("{dim}  \u{2504}\u{2504} {} ({}) {}{reset}",
-                stage_label(p.stage), count, "\u{2504}".repeat(80));
+                stage_label(p.stage), count, "\u{2504}".repeat(68));
             last_stage = Some(p.stage);
         }
 
         let act = action_icon(action.label());
         let days_stale = (today - p.last_activity).num_days();
-        let icon = archetype_icon(p.project_type.short());
+        let icon = archetype_icon(p.project_type.as_str());
+        let type_col = format!("{} {}", icon, p.project_type.display());
 
         let fmt_ax = |v: Option<u8>| -> String {
             match v {
-                Some(n) => format!("{:>2}", n),
-                None => format!("{dim} \u{00B7}{reset}"),
+                Some(n) => format!("{:>4}", n),
+                None => format!("  {dim}\u{00B7}{reset}"),
             }
         };
 
-        println!("{:>3}  {:<24} {:>5}  {:<26} {} {:<4} {:>3} {:>3} {:>3} {:>3} {:>4}d",
-            rank + 1,
+        println!("{:>4}  {:<22} {:>5}  {:<25} {:<10} {} {} {} {} {:>4}d",
+            p.id,
             act,
             score,
-            truncate(&p.name, 25),
-            icon,
-            p.project_type.short(),
+            truncate(&p.name, 24),
+            type_col,
             fmt_ax(p.velocity),
             fmt_ax(p.fit_signal),
             fmt_ax(p.distinctness),
             fmt_ax(p.leverage),
             days_stale,
         );
+    }
+
+    if !show_all && hidden > 0 {
+        println!("\n{dim}{} unscored projects hidden (use --all to show){reset}", hidden);
     }
 }
 
@@ -328,11 +345,13 @@ fn fmt_axis(v: Option<u8>) -> String {
     v.map(|v| format!("{}/10", v)).unwrap_or_else(|| "-".to_string())
 }
 
-fn cmd_remove(store: &Store, id: i64) {
-    match store.soft_delete(id) {
-        Ok(0) => println!("Project {} not found", id),
-        Ok(_) => println!("Removed project {} (restore within 30 days with: pm restore {})", id, id),
-        Err(e) => eprintln!("Failed: {}", e),
+fn cmd_remove(store: &Store, ids: &[i64]) {
+    for &id in ids {
+        match store.soft_delete(id) {
+            Ok(0) => println!("Project {} not found", id),
+            Ok(_) => println!("Removed {} (restore with: pm restore {})", id, id),
+            Err(e) => eprintln!("Failed to remove {}: {}", id, e),
+        }
     }
 }
 
@@ -344,11 +363,13 @@ fn cmd_rename(store: &Store, id: i64, name: &str) {
     }
 }
 
-fn cmd_archive(store: &Store, id: i64) {
-    match store.update_state(id, ProjectState::Archived) {
-        Ok(0) => println!("Project {} not found", id),
-        Ok(_) => println!("Archived project {}", id),
-        Err(e) => eprintln!("Failed: {}", e),
+fn cmd_archive(store: &Store, ids: &[i64]) {
+    for &id in ids {
+        match store.update_state(id, ProjectState::Archived) {
+            Ok(0) => println!("Project {} not found", id),
+            Ok(_) => println!("Archived {}", id),
+            Err(e) => eprintln!("Failed to archive {}: {}", id, e),
+        }
     }
 }
 

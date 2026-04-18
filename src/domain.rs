@@ -34,6 +34,15 @@ impl ProjectType {
             ProjectType::Webapp => "W",
         }
     }
+
+    pub fn display(&self) -> &'static str {
+        match self {
+            ProjectType::Oss => "Tool",
+            ProjectType::Research => "Research",
+            ProjectType::Game => "Game",
+            ProjectType::Webapp => "Webapp",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -157,8 +166,17 @@ impl Project {
         [self.velocity, self.fit_signal, self.distinctness, self.leverage]
     }
 
+    pub fn axis_coverage(&self) -> f32 {
+        let count = [self.velocity, self.fit_signal, self.distinctness, self.leverage]
+            .iter()
+            .filter(|a| a.is_some())
+            .count();
+        count as f32 / 4.0
+    }
+
     pub fn priority_score(&self, today: chrono::NaiveDate) -> i32 {
-        let base = self.stage_contribution() + self.mean_axes() as i32;
+        let stage_base = (self.stage_contribution() as f32 * self.axis_coverage()) as i32;
+        let base = stage_base + self.mean_axes() as i32;
         (base - self.staleness_penalty(today)).max(0)
     }
 
@@ -210,6 +228,16 @@ impl Project {
         if let (Some(l), true) = (lev, sunk > t.repurpose_sunk) {
             if l < t.repurpose_lev {
                 return ProjectAction::Repurpose;
+            }
+        }
+        if fit.is_none() {
+            if let Some(v) = vel {
+                if v >= t.push_vel && self.stage < t.ship_stage {
+                    return ProjectAction::Push;
+                }
+                if v < t.groom_vel && self.stage >= 2 {
+                    return ProjectAction::Groom;
+                }
             }
         }
         ProjectAction::Observe
@@ -355,15 +383,37 @@ mod tests {
     }
 
     #[test]
-    fn action_observe_when_axes_unscored() {
+    fn action_push_when_high_velocity_no_fit() {
         let p = make_project(1, Some(9), None, Some(8), Some(5));
-        assert_eq!(p.action_recommendation(None), ProjectAction::Observe);
+        assert_eq!(p.action_recommendation(None), ProjectAction::Push);
+    }
+
+    #[test]
+    fn action_groom_when_low_velocity_no_fit() {
+        let p = make_project(2, Some(1), None, Some(8), Some(5));
+        assert_eq!(p.action_recommendation(None), ProjectAction::Groom);
     }
 
     #[test]
     fn action_observe_when_all_none() {
         let p = make_project(0, None, None, None, None);
         assert_eq!(p.action_recommendation(None), ProjectAction::Observe);
+    }
+
+    #[test]
+    fn coverage_factor_scales_stage_bonus() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
+        let no_axes = make_project(3, None, None, None, None);
+        assert_eq!(no_axes.priority_score(today), 0);
+
+        let one_axis = make_project(3, Some(8), None, None, None);
+        assert_eq!(one_axis.priority_score(today), 23);
+
+        let two_axes = make_project(3, Some(8), Some(6), None, None);
+        assert_eq!(two_axes.priority_score(today), 37);
+
+        let all_axes = make_project(3, Some(8), Some(6), Some(7), Some(9));
+        assert_eq!(all_axes.priority_score(today), 67);
     }
 
     #[test]
