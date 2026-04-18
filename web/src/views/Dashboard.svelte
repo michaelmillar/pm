@@ -92,10 +92,11 @@
     { key: "score", label: "Score", numeric: true },
     { key: "action", label: "Action", numeric: false },
     { key: "velocity", label: "Velocity", numeric: true },
-    { key: "fit_signal", label: "Fit", numeric: true },
+    { key: "top_threat", label: "Threat", numeric: false },
     { key: "distinctness", label: "Distinct", numeric: true },
     { key: "leverage", label: "Leverage", numeric: true },
     { key: "days_stale", label: "Stale", numeric: true },
+    { key: "next_task", label: "Next", numeric: false },
   ];
 </script>
 
@@ -155,10 +156,15 @@
               {/if}
             </td>
             <td class="num">{axisDisplay(p.velocity)}</td>
-            <td class="num">{axisDisplay(p.fit_signal)}</td>
+            <td class="threat-cell">
+              {#if p.top_threat}<span class="threat-tag">{p.top_threat}</span>{:else}<span class="dim">&mdash;</span>{/if}
+            </td>
             <td class="num">{axisDisplay(p.distinctness)}</td>
             <td class="num">{axisDisplay(p.leverage)}</td>
             <td class="num" style="color: {staleColour(p.days_stale)}">{p.days_stale}d</td>
+            <td class="next-cell">
+              {#if p.next_task}<span class="next-text" title={p.next_task}>{p.next_task}</span>{:else}<span class="dim">&mdash;</span>{/if}
+            </td>
           </tr>
         {/each}
       </tbody>

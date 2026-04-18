@@ -25,9 +25,8 @@
 
   let colour = $derived(actionColour(project.action));
 
-  const axes: { key: "velocity" | "fit_signal" | "distinctness" | "leverage"; label: string }[] = [
+  const axes: { key: "velocity" | "distinctness" | "leverage"; label: string }[] = [
     { key: "velocity", label: "V" },
-    { key: "fit_signal", label: "F" },
     { key: "distinctness", label: "D" },
     { key: "leverage", label: "L" },
   ];
@@ -73,6 +72,20 @@
       </div>
     {/each}
   </div>
+
+  {#if project.top_threat}
+    <div class="card-threat">
+      <span class="card-threat-label">Threat</span>
+      <span class="card-threat-tag">{project.top_threat}</span>
+    </div>
+  {/if}
+
+  {#if project.next_task}
+    <div class="card-next">
+      <span class="card-next-label">Next</span>
+      <span class="card-next-text">{project.next_task}</span>
+    </div>
+  {/if}
 
   <div class="card-footer">
     <span>{project.stage_label}</span>

@@ -35,6 +35,7 @@ pub struct ApiProject {
     pub path: Option<String>,
     pub next_task: Option<String>,
     pub next_task_source: Option<String>,
+    pub top_threat: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -102,6 +103,8 @@ fn project_to_api(p: &crate::domain::Project, all_projects: &[crate::domain::Pro
     let nearest = find_nearest_neighbour(p, all_projects);
     let action = p.action_recommendation(nearest.as_deref());
     let next = crate::next_task::resolve(p, &action);
+    let top_threat = p.research_summary.as_deref()
+        .and_then(crate::scanner::extract_top_threat);
 
     ApiProject {
         id: p.id,
@@ -127,6 +130,7 @@ fn project_to_api(p: &crate::domain::Project, all_projects: &[crate::domain::Pro
         path: p.path.clone(),
         next_task: next.as_ref().map(|n| n.text.clone()),
         next_task_source: next.as_ref().map(|n| n.source.to_string()),
+        top_threat,
     }
 }
 

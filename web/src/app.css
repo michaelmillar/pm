@@ -288,6 +288,48 @@ td.name-cell {
   color: var(--ink);
 }
 
+.threat-cell {
+  min-width: 140px;
+  max-width: 200px;
+  padding-right: 1.25rem;
+}
+
+.threat-tag {
+  display: inline-block;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.78rem;
+  background: var(--surface, #fafafa);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--ink-soft);
+  font-family: system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.next-cell {
+  min-width: 280px;
+  max-width: 420px;
+  padding-left: 1.25rem;
+}
+
+.next-text {
+  display: inline-block;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--ink);
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dim {
+  color: var(--ink-faint);
+}
+
 /* axes display */
 
 .axes-row {
@@ -730,8 +772,47 @@ td.name-cell {
 
 .project-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 1.25rem;
+}
+
+.card-threat,
+.card-next {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.card-threat-label,
+.card-next-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  font-family: system-ui, -apple-system, sans-serif;
+  flex-shrink: 0;
+  min-width: 3rem;
+}
+
+.card-threat-tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: var(--surface, #fafafa);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.card-next-text {
+  color: var(--ink);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .project-card {

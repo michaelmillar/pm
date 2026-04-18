@@ -17,6 +17,9 @@ export interface Project {
   created_at: string;
   soft_deadline: string | null;
   path: string | null;
+  next_task: string | null;
+  next_task_source: string | null;
+  top_threat: string | null;
 }
 
 export interface ProjectDetail extends Project {

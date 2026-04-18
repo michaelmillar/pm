@@ -142,6 +142,60 @@ fn count_git_tags(path: &Path) -> (bool, usize) {
     }
 }
 
+pub fn extract_top_threat(research: &str) -> Option<String> {
+    let lines: Vec<&str> = research.lines().collect();
+    let mut in_competitors_section = false;
+    for line in &lines {
+        let trimmed = line.trim();
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("##") {
+            in_competitors_section = lower.contains("competitor") || lower.contains("existing")
+                || lower.contains("landscape");
+            continue;
+        }
+        if !in_competitors_section { continue; }
+        if let Some(name) = extract_first_bold_link(trimmed) {
+            return Some(truncate_words(&name, 3));
+        }
+        if let Some(name) = extract_table_bold(trimmed) {
+            return Some(truncate_words(&name, 3));
+        }
+    }
+    for line in &lines {
+        if let Some(name) = extract_first_bold_link(line.trim()) {
+            return Some(truncate_words(&name, 3));
+        }
+    }
+    None
+}
+
+fn extract_first_bold_link(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let i = line.find("**[")?;
+    let after = &line[i + 3..];
+    let close = after.find("]")?;
+    let name = after[..close].trim().to_string();
+    let _ = bytes;
+    if name.is_empty() { None } else { Some(name) }
+}
+
+fn extract_table_bold(line: &str) -> Option<String> {
+    if !line.starts_with('|') { return None; }
+    let i = line.find("**")?;
+    let after = &line[i + 2..];
+    let close = after.find("**")?;
+    let name = after[..close].trim().to_string();
+    if name.is_empty() || name.contains('-') || name.eq_ignore_ascii_case("name") {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+fn truncate_words(s: &str, max_words: usize) -> String {
+    s.split_whitespace().take(max_words).collect::<Vec<_>>().join(" ")
+}
+
 pub fn extract_next_task(repo: &Path) -> Option<String> {
     for fname in ["PLAN.md", "TODO.md", "ROADMAP.md", "plan.md", "todo.md", "roadmap.md"] {
         let p = repo.join(fname);

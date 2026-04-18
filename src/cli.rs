@@ -257,10 +257,10 @@ fn cmd_status(store: &Store, sort: StatusSort, show_all: bool) {
     let reset = "\x1b[0m";
     let bold = "\x1b[1m";
 
-    println!("{bold}{:>4}  {:<13} {:>5}  {:<25} {:<10} {:>4} {:>4} {:>4} {:>4} {:>5}  {:<40}{reset}",
+    println!("{bold}{:>4}  {:<13} {:>5}  {:<25} {:<10} {:>4} {:<18} {:>4} {:>4} {:>5}  {:<40}{reset}",
         "ID", "Action", "Score", "Project", "Type",
-        "Vel", "Fit", "Dst", "Lev", "Stale", "Next");
-    println!("{dim}{}{reset}", "\u{2500}".repeat(126));
+        "Vel", "Threat", "Dst", "Lev", "Stale", "Next");
+    println!("{dim}{}{reset}", "\u{2500}".repeat(140));
 
     let mut last_stage: Option<u8> = None;
     for (p, score, action) in &scored {
@@ -291,15 +291,19 @@ fn cmd_status(store: &Store, sort: StatusSort, show_all: bool) {
             Some(n) => truncate(&n.text, 40),
             None => String::new(),
         };
+        let threat = p.research_summary.as_deref()
+            .and_then(crate::scanner::extract_top_threat)
+            .map(|s| truncate(&s, 18))
+            .unwrap_or_else(|| format!("  {dim}\u{00B7}{reset}"));
 
-        println!("{:>4}  {:<22} {:>5}  {:<25} {:<10} {} {} {} {} {:>4}d  {}",
+        println!("{:>4}  {:<22} {:>5}  {:<25} {:<10} {} {:<18} {} {} {:>4}d  {}",
             p.id,
             act,
             score,
             truncate(&p.name, 24),
             type_col,
             fmt_ax(p.velocity),
-            fmt_ax(p.fit_signal),
+            threat,
             fmt_ax(p.distinctness),
             fmt_ax(p.leverage),
             days_stale,
