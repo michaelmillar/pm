@@ -1,11 +1,11 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::get,
     Json, Router,
 };
 use chrono::Local;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 use crate::domain::ProjectState;
@@ -49,6 +49,37 @@ pub struct ApiNextRecommendation {
     pub reason: String,
 }
 
+#[derive(Serialize)]
+pub struct ApiPortfolioStats {
+    pub total: usize,
+    pub scored: usize,
+    pub unscored: usize,
+    pub avg_score: f32,
+    pub avg_staleness: f32,
+    pub by_stage: Vec<StageBucket>,
+    pub by_action: Vec<ActionBucket>,
+    pub score_distribution: Vec<ScoreBucket>,
+}
+
+#[derive(Serialize)]
+pub struct StageBucket {
+    pub label: String,
+    pub count: usize,
+}
+
+#[derive(Serialize)]
+pub struct ActionBucket {
+    pub action: String,
+    pub count: usize,
+}
+
+#[derive(Serialize)]
+pub struct ScoreBucket {
+    pub min: i32,
+    pub max: i32,
+    pub count: usize,
+}
+
 fn stage_label(stage: u8) -> &'static str {
     match stage {
         0 => "idea",
@@ -74,7 +105,7 @@ fn project_to_api(p: &crate::domain::Project, all_projects: &[crate::domain::Pro
             ProjectState::Active => "active".to_string(),
             ProjectState::Archived => "archived".to_string(),
         },
-        archetype: p.project_type.as_str().to_string(),
+        archetype: p.project_type.display().to_string(),
         stage: p.stage,
         stage_label: stage_label(p.stage).to_string(),
         velocity: p.velocity,
@@ -113,13 +144,20 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{id}", get(get_project_detail))
         .route("/archived", get(list_archived))
         .route("/next", get(get_next))
+        .route("/stats", get(get_stats))
         .with_state(state);
 
     Router::new().nest("/api", api)
 }
 
+#[derive(Deserialize)]
+struct ListParams {
+    all: Option<bool>,
+}
+
 async fn list_projects(
     State(store): State<AppState>,
+    Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<ApiProject>>, StatusCode> {
     let store = store.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let projects = store
@@ -129,6 +167,9 @@ async fn list_projects(
         .iter()
         .map(|p| project_to_api(p, &projects))
         .collect();
+    if !params.all.unwrap_or(false) {
+        api_projects.retain(|p| p.score > 0);
+    }
     api_projects.sort_by(|a, b| b.score.cmp(&a.score));
     Ok(Json(api_projects))
 }
@@ -193,4 +234,93 @@ async fn get_next(
             reason: "No active projects".to_string(),
         })),
     }
+}
+
+async fn get_stats(
+    State(store): State<AppState>,
+) -> Result<Json<ApiPortfolioStats>, StatusCode> {
+    let store = store.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let projects = store
+        .list_active_projects()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let today = Local::now().date_naive();
+
+    let total = projects.len();
+    let api_projects: Vec<ApiProject> = projects
+        .iter()
+        .map(|p| project_to_api(p, &projects))
+        .collect();
+
+    let scored = api_projects.iter().filter(|p| p.score > 0).count();
+    let unscored = total - scored;
+
+    let avg_score = if total > 0 {
+        api_projects.iter().map(|p| p.score as f32).sum::<f32>() / total as f32
+    } else {
+        0.0
+    };
+
+    let avg_staleness = if total > 0 {
+        projects
+            .iter()
+            .map(|p| (today - p.last_activity).num_days() as f32)
+            .sum::<f32>()
+            / total as f32
+    } else {
+        0.0
+    };
+
+    let stage_labels = ["idea", "spike", "prototype", "validated", "shipped", "traction+"];
+    let by_stage: Vec<StageBucket> = stage_labels
+        .iter()
+        .map(|&label| {
+            let count = api_projects.iter().filter(|p| p.stage_label == label).count();
+            StageBucket {
+                label: label.to_string(),
+                count,
+            }
+        })
+        .collect();
+
+    let mut action_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for p in &api_projects {
+        *action_counts.entry(p.action.clone()).or_insert(0) += 1;
+    }
+    let mut by_action: Vec<ActionBucket> = action_counts
+        .into_iter()
+        .map(|(action, count)| ActionBucket { action, count })
+        .collect();
+    by_action.sort_by(|a, b| b.count.cmp(&a.count));
+
+    let score_distribution: Vec<ScoreBucket> = (0..10)
+        .map(|i| {
+            let min = i * 10;
+            let max = if i == 9 { 100 } else { min + 10 };
+            let count = api_projects
+                .iter()
+                .filter(|p| {
+                    if i == 9 {
+                        p.score >= min && p.score <= max
+                    } else {
+                        p.score >= min && p.score < max
+                    }
+                })
+                .count();
+            ScoreBucket {
+                min: min as i32,
+                max: max as i32,
+                count,
+            }
+        })
+        .collect();
+    Ok(Json(ApiPortfolioStats {
+        total,
+        scored,
+        unscored,
+        avg_score,
+        avg_staleness,
+        by_stage,
+        by_action,
+        score_distribution,
+    }))
 }
