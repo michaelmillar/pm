@@ -121,6 +121,8 @@ mod tests {
             deleted_at: None,
             duplicate_of: None,
             possible_duplicate_score: None,
+            research_summary: None,
+            inbox_note: None,
         }
     }
 

@@ -22,6 +22,8 @@ export interface Project {
 export interface ProjectDetail extends Project {
   sunk_cost_days: number | null;
   pivot_count: number;
+  research_summary: string | null;
+  inbox_note: string | null;
 }
 
 export interface NextRecommendation {

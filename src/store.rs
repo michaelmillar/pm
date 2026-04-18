@@ -25,7 +25,7 @@ pub struct PivotEvent {
 const PROJECT_COLUMNS: &str =
     "id, name, state, project_type, stage, velocity, fit_signal, distinctness, leverage, \
      sunk_cost_days, pivot_count, last_activity, created_at, soft_deadline, path, \
-     deleted_at, duplicate_of, possible_duplicate_score";
+     deleted_at, duplicate_of, possible_duplicate_score, research_summary, inbox_note";
 
 impl Store {
     pub fn open(path: &std::path::Path) -> Result<Self> {
@@ -67,7 +67,9 @@ impl Store {
                 path TEXT,
                 deleted_at TEXT,
                 duplicate_of INTEGER,
-                possible_duplicate_score REAL
+                possible_duplicate_score REAL,
+                research_summary TEXT,
+                inbox_note TEXT
             );
 
             CREATE TABLE IF NOT EXISTS stage_events (
@@ -567,6 +569,8 @@ impl Store {
             deleted_at: deleted_at.map(|s| parse_date(&s)),
             duplicate_of: row.get(16)?,
             possible_duplicate_score: row.get(17)?,
+            research_summary: row.get(18)?,
+            inbox_note: row.get(19)?,
         })
     }
 }

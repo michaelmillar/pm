@@ -41,6 +41,8 @@ pub struct ApiProjectDetail {
     pub project: ApiProject,
     pub sunk_cost_days: Option<i32>,
     pub pivot_count: u32,
+    pub research_summary: Option<String>,
+    pub inbox_note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -191,6 +193,8 @@ async fn get_project_detail(
         project: api_project,
         sunk_cost_days: project.sunk_cost_days,
         pivot_count: project.pivot_count,
+        research_summary: project.research_summary,
+        inbox_note: project.inbox_note,
     }))
 }
 

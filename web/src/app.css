@@ -256,6 +256,38 @@ td.name-cell {
   color: var(--ink-soft);
 }
 
+.detail-section {
+  margin-top: 1.5rem;
+  border: 1px solid var(--border);
+}
+
+.detail-section summary {
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  background: var(--surface, #fafafa);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.detail-section[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-section:not([open]) summary {
+  border-bottom: none;
+}
+
+.detail-section-body {
+  padding: 1rem;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--ink);
+}
+
 /* axes display */
 
 .axes-row {

@@ -144,6 +144,8 @@ pub struct Project {
     pub deleted_at: Option<chrono::NaiveDate>,
     pub duplicate_of: Option<i64>,
     pub possible_duplicate_score: Option<f32>,
+    pub research_summary: Option<String>,
+    pub inbox_note: Option<String>,
 }
 
 impl Project {
@@ -275,6 +277,8 @@ mod tests {
             deleted_at: None,
             duplicate_of: None,
             possible_duplicate_score: None,
+            research_summary: None,
+            inbox_note: None,
         }
     }
 

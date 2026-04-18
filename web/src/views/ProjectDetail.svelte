@@ -93,6 +93,20 @@
       </dl>
     </div>
   </div>
+
+  {#if detail.research_summary}
+    <details class="detail-section" open>
+      <summary>Research</summary>
+      <div class="detail-section-body research-body">{detail.research_summary}</div>
+    </details>
+  {/if}
+
+  {#if detail.inbox_note}
+    <details class="detail-section" open>
+      <summary>Notes</summary>
+      <div class="detail-section-body">{detail.inbox_note}</div>
+    </details>
+  {/if}
 {:else}
   <div class="empty-state">Project not found.</div>
 {/if}
