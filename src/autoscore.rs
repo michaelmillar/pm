@@ -1,5 +1,6 @@
 use crate::adapters;
-use crate::domain::Project;
+use crate::domain::{Project, ProjectType, RepoSignals};
+use crate::scanner;
 use crate::scoring::{distinctness, leverage, velocity};
 use crate::store::Store;
 use std::path::Path;
@@ -18,6 +19,7 @@ fn score_one(store: &Store, project: &Project, all: &[Project], fetch_remote: bo
         _ => return Ok(()),
     };
     let repo = Path::new(&path);
+    let signals = scanner::scan_signals(repo);
 
     if let Some(vel) = velocity::compute(repo) {
         store.update_axis(project.id, "velocity", Some(vel.score))
@@ -41,37 +43,54 @@ fn score_one(store: &Store, project: &Project, all: &[Project], fetch_remote: bo
         }
     }
 
-    if project.stage == 0 {
-        if let Some(suggested) = suggest_stage(repo) {
-            if suggested > project.stage {
-                store.record_stage_event(
-                    project.id,
-                    project.stage,
-                    suggested,
-                    Some("autoscore suggestion"),
-                ).map_err(|e| e.to_string())?;
-            }
-        }
+    let detected_type = detect_project_type(&signals);
+    if detected_type != ProjectType::Oss && project.project_type == ProjectType::Oss {
+        store.update_project_type(project.id, &detected_type)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let suggested = suggest_stage(&signals);
+    if suggested > project.stage {
+        store.update_stage(project.id, suggested)
+            .map_err(|e| e.to_string())?;
+        store.record_stage_event(
+            project.id,
+            project.stage,
+            suggested,
+            Some("auto-detected from repo signals"),
+        ).map_err(|e| e.to_string())?;
     }
 
     Ok(())
 }
 
-fn suggest_stage(path: &Path) -> Option<u8> {
-    let has_readme = path.join("README.md").exists();
-    let has_src = path.join("src").is_dir();
-    let has_tests = path.join("tests").is_dir();
+fn detect_project_type(signals: &RepoSignals) -> ProjectType {
+    if signals.has_game_engine {
+        return ProjectType::Game;
+    }
+    if signals.has_notebooks {
+        return ProjectType::Research;
+    }
+    if signals.has_webapp_framework {
+        return ProjectType::Webapp;
+    }
+    ProjectType::Oss
+}
 
-    if !has_src && !has_readme {
-        return Some(0);
+fn suggest_stage(signals: &RepoSignals) -> u8 {
+    if signals.has_tags && signals.has_ci && signals.has_readme {
+        return 4;
     }
-    if has_src && has_readme && has_tests {
-        return Some(2);
+    if signals.has_ci || (signals.has_tags && signals.has_tests) {
+        return 3;
     }
-    if has_src || has_readme {
-        return Some(1);
+    if signals.has_src && signals.has_readme && signals.has_tests {
+        return 2;
     }
-    Some(0)
+    if signals.has_src || signals.has_readme {
+        return 1;
+    }
+    0
 }
 
 #[cfg(test)]
@@ -106,6 +125,12 @@ mod tests {
         }
     }
 
+    fn signals(f: impl FnOnce(&mut RepoSignals)) -> RepoSignals {
+        let mut s = RepoSignals::default();
+        f(&mut s);
+        s
+    }
+
     #[test]
     fn score_one_skips_no_path() {
         let store = Store::open_in_memory().unwrap();
@@ -114,25 +139,70 @@ mod tests {
     }
 
     #[test]
-    fn suggest_stage_empty_dir_is_zero() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(suggest_stage(tmp.path()), Some(0));
+    fn stage_empty_is_zero() {
+        assert_eq!(suggest_stage(&RepoSignals::default()), 0);
     }
 
     #[test]
-    fn suggest_stage_with_src_and_readme_is_one() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir(tmp.path().join("src")).unwrap();
-        std::fs::write(tmp.path().join("README.md"), "hello").unwrap();
-        assert_eq!(suggest_stage(tmp.path()), Some(1));
+    fn stage_src_only_is_one() {
+        assert_eq!(suggest_stage(&signals(|s| s.has_src = true)), 1);
     }
 
     #[test]
-    fn suggest_stage_with_tests_is_two() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir(tmp.path().join("src")).unwrap();
-        std::fs::create_dir(tmp.path().join("tests")).unwrap();
-        std::fs::write(tmp.path().join("README.md"), "hello").unwrap();
-        assert_eq!(suggest_stage(tmp.path()), Some(2));
+    fn stage_src_readme_tests_is_two() {
+        assert_eq!(suggest_stage(&signals(|s| {
+            s.has_src = true;
+            s.has_readme = true;
+            s.has_tests = true;
+        })), 2);
+    }
+
+    #[test]
+    fn stage_with_ci_is_three() {
+        assert_eq!(suggest_stage(&signals(|s| {
+            s.has_src = true;
+            s.has_readme = true;
+            s.has_tests = true;
+            s.has_ci = true;
+        })), 3);
+    }
+
+    #[test]
+    fn stage_tags_ci_readme_is_four() {
+        assert_eq!(suggest_stage(&signals(|s| {
+            s.has_src = true;
+            s.has_readme = true;
+            s.has_tests = true;
+            s.has_ci = true;
+            s.has_tags = true;
+        })), 4);
+    }
+
+    #[test]
+    fn type_game_engine_detected() {
+        assert_eq!(detect_project_type(&signals(|s| s.has_game_engine = true)), ProjectType::Game);
+    }
+
+    #[test]
+    fn type_notebooks_detected_as_research() {
+        assert_eq!(detect_project_type(&signals(|s| s.has_notebooks = true)), ProjectType::Research);
+    }
+
+    #[test]
+    fn type_webapp_framework_detected() {
+        assert_eq!(detect_project_type(&signals(|s| s.has_webapp_framework = true)), ProjectType::Webapp);
+    }
+
+    #[test]
+    fn type_default_is_oss() {
+        assert_eq!(detect_project_type(&RepoSignals::default()), ProjectType::Oss);
+    }
+
+    #[test]
+    fn game_engine_takes_priority_over_webapp() {
+        assert_eq!(detect_project_type(&signals(|s| {
+            s.has_game_engine = true;
+            s.has_webapp_framework = true;
+        })), ProjectType::Game);
     }
 }

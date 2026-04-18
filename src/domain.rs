@@ -251,6 +251,24 @@ pub struct ScanResult {
     pub last_commit_date: Option<chrono::NaiveDate>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct RepoSignals {
+    pub has_src: bool,
+    pub has_readme: bool,
+    pub has_tests: bool,
+    pub has_ci: bool,
+    pub has_tags: bool,
+    pub tag_count: usize,
+    pub has_license: bool,
+    pub has_changelog: bool,
+    pub has_cargo_toml: bool,
+    pub has_package_json: bool,
+    pub has_game_engine: bool,
+    pub has_notebooks: bool,
+    pub has_webapp_framework: bool,
+    pub contributor_count: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
