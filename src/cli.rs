@@ -292,7 +292,7 @@ fn cmd_status(store: &Store, sort: StatusSort, show_all: bool) {
             None => String::new(),
         };
         let threat = p.research_summary.as_deref()
-            .and_then(crate::scanner::extract_top_threat)
+            .and_then(|s| crate::scanner::extract_top_threat(s, &p.name))
             .map(|s| truncate(&s, 18))
             .unwrap_or_else(|| format!("  {dim}\u{00B7}{reset}"));
 

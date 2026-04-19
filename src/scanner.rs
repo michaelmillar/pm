@@ -142,55 +142,190 @@ fn count_git_tags(path: &Path) -> (bool, usize) {
     }
 }
 
-pub fn extract_top_threat(research: &str) -> Option<String> {
-    let lines: Vec<&str> = research.lines().collect();
-    let mut in_competitors_section = false;
-    for line in &lines {
-        let trimmed = line.trim();
-        let lower = trimmed.to_lowercase();
-        if lower.starts_with("##") {
-            in_competitors_section = lower.contains("competitor") || lower.contains("existing")
-                || lower.contains("landscape");
-            continue;
-        }
-        if !in_competitors_section { continue; }
-        if let Some(name) = extract_first_bold_link(trimmed) {
-            return Some(truncate_words(&name, 3));
-        }
-        if let Some(name) = extract_table_bold(trimmed) {
-            return Some(truncate_words(&name, 3));
-        }
-    }
-    for line in &lines {
-        if let Some(name) = extract_first_bold_link(line.trim()) {
-            return Some(truncate_words(&name, 3));
+pub fn extract_readme_research(repo: &Path) -> Option<String> {
+    let readme_path = find_readme(repo)?;
+    let content = std::fs::read_to_string(&readme_path).ok()?;
+    extract_section(&content, &[
+        "how it compares",
+        "comparison",
+        "alternatives",
+        "competitors",
+        "competitive landscape",
+        "prior art",
+    ])
+}
+
+fn find_readme(repo: &Path) -> Option<std::path::PathBuf> {
+    for entry in std::fs::read_dir(repo).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if name.starts_with("readme") {
+            return Some(entry.path());
         }
     }
     None
 }
 
+fn extract_section(content: &str, section_titles: &[&str]) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut start: Option<usize> = None;
+    let mut header_level: usize = 2;
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('#') { continue; }
+        let level = trimmed.chars().take_while(|c| *c == '#').count();
+        let title = trimmed.trim_start_matches('#').trim().to_lowercase();
+        if section_titles.iter().any(|t| title.starts_with(t)) {
+            start = Some(i + 1);
+            header_level = level;
+            break;
+        }
+    }
+    let start = start?;
+    let mut end = lines.len();
+    for (i, line) in lines.iter().enumerate().skip(start) {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            let level = trimmed.chars().take_while(|c| *c == '#').count();
+            if level <= header_level {
+                end = i;
+                break;
+            }
+        }
+    }
+    let body: String = lines[start..end].join("\n").trim().to_string();
+    if body.is_empty() { None } else { Some(body) }
+}
+
+pub fn extract_top_threat(research: &str, project_name: &str) -> Option<String> {
+    let self_lower = project_name.to_lowercase();
+    let is_self = |s: &str| {
+        let cleaned: String = s.to_lowercase().chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .collect();
+        cleaned.trim() == self_lower.trim()
+    };
+    for table in collect_tables(research) {
+        if let Some(name) = pick_competitor_from_table(&table, &self_lower, &is_self) {
+            return Some(truncate_clean(&name, 3));
+        }
+    }
+    for line in research.lines() {
+        let trimmed = line.trim();
+        if let Some(name) = extract_first_bold_link(trimmed) {
+            if !is_self(&name) {
+                return Some(truncate_clean(&name, 3));
+            }
+        }
+    }
+    None
+}
+
+fn collect_tables(content: &str) -> Vec<Vec<String>> {
+    let mut tables: Vec<Vec<String>> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('|') {
+            current.push(trimmed.to_string());
+        } else if !current.is_empty() {
+            tables.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() { tables.push(current); }
+    tables.into_iter().filter(|t| t.len() >= 2).collect()
+}
+
+fn pick_competitor_from_table(
+    rows: &[String],
+    self_lower: &str,
+    is_self: &dyn Fn(&str) -> bool,
+) -> Option<String> {
+    let header_in_first_col = rows[0].to_lowercase().contains(self_lower);
+    if header_in_first_col {
+        let header_cells = parse_table_row(&rows[0]);
+        for cell in header_cells.iter().skip(1) {
+            if !is_self(cell) && !is_separator_or_label(cell) && !is_feature_value(cell) {
+                return Some(cell.clone());
+            }
+        }
+    }
+    for row in rows.iter().skip(1) {
+        if is_separator_row(row) { continue; }
+        let cells = parse_table_row(row);
+        if let Some(first) = cells.first() {
+            if !is_self(first) && !is_separator_or_label(first) && !is_feature_value(first) {
+                return Some(first.clone());
+            }
+        }
+    }
+    None
+}
+
+fn is_separator_row(line: &str) -> bool {
+    line.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
+}
+
+fn is_separator_or_label(s: &str) -> bool {
+    is_table_separator(s) || is_header_label(s)
+}
+
+fn is_feature_value(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    matches!(lower.as_str(),
+        "yes" | "no" | "none" | "n/a" | "na" | "sometimes" | "rarely" | "always" | "never"
+        | "varies" | "partial" | "partially" | "implicitly" | "true" | "false")
+        || lower.starts_with("yes ") || lower.starts_with("no ")
+}
+
+fn parse_table_row(line: &str) -> Vec<String> {
+    line.trim_matches('|')
+        .split('|')
+        .map(|c| {
+            c.trim()
+                .trim_matches('*')
+                .trim_matches('`')
+                .trim()
+                .to_string()
+        })
+        .filter(|c| !c.is_empty())
+        .collect()
+}
+
+fn truncate_clean(s: &str, max_words: usize) -> String {
+    let truncated = truncate_words(s, max_words);
+    let mut t: String = truncated.trim()
+        .trim_end_matches(|c: char| c == ',' || c == ';' || c == '.' || c == ':')
+        .to_string();
+    if t.matches('(').count() > t.matches(')').count() {
+        if let Some(idx) = t.rfind('(') {
+            t = t[..idx].trim().to_string();
+        }
+    }
+    if t.matches('[').count() > t.matches(']').count() {
+        if let Some(idx) = t.rfind('[') {
+            t = t[..idx].trim().to_string();
+        }
+    }
+    t
+}
+
+fn is_table_separator(s: &str) -> bool {
+    s.chars().all(|c| c == '-' || c == ':' || c.is_whitespace())
+}
+
+fn is_header_label(s: &str) -> bool {
+    matches!(s.to_lowercase().as_str(),
+        "name" | "tool" | "product" | "alternative" | "competitor" | "project")
+}
+
 fn extract_first_bold_link(line: &str) -> Option<String> {
-    let bytes = line.as_bytes();
     let i = line.find("**[")?;
     let after = &line[i + 3..];
     let close = after.find("]")?;
     let name = after[..close].trim().to_string();
-    let _ = bytes;
     if name.is_empty() { None } else { Some(name) }
 }
 
-fn extract_table_bold(line: &str) -> Option<String> {
-    if !line.starts_with('|') { return None; }
-    let i = line.find("**")?;
-    let after = &line[i + 2..];
-    let close = after.find("**")?;
-    let name = after[..close].trim().to_string();
-    if name.is_empty() || name.contains('-') || name.eq_ignore_ascii_case("name") {
-        None
-    } else {
-        Some(name)
-    }
-}
 
 fn truncate_words(s: &str, max_words: usize) -> String {
     s.split_whitespace().take(max_words).collect::<Vec<_>>().join(" ")

@@ -259,6 +259,13 @@ impl Store {
         )
     }
 
+    pub fn update_research_summary(&self, id: i64, summary: &str) -> Result<usize> {
+        self.conn.execute(
+            "UPDATE projects SET research_summary = ?1 WHERE id = ?2",
+            params![summary, id],
+        )
+    }
+
     pub fn update_from_scan(&self, id: i64, last_activity: NaiveDate) -> Result<usize> {
         self.conn.execute(
             "UPDATE projects SET last_activity = ?1 WHERE id = ?2",

@@ -49,6 +49,13 @@ fn score_one(store: &Store, project: &Project, all: &[Project], fetch_remote: bo
             .map_err(|e| e.to_string())?;
     }
 
+    if project.research_summary.is_none() {
+        if let Some(readme_research) = scanner::extract_readme_research(repo) {
+            store.update_research_summary(project.id, &readme_research)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
     let suggested = suggest_stage(&signals);
     if suggested > project.stage {
         store.update_stage(project.id, suggested)

@@ -104,7 +104,7 @@ fn project_to_api(p: &crate::domain::Project, all_projects: &[crate::domain::Pro
     let action = p.action_recommendation(nearest.as_deref());
     let next = crate::next_task::resolve(p, &action);
     let top_threat = p.research_summary.as_deref()
-        .and_then(crate::scanner::extract_top_threat);
+        .and_then(|s| crate::scanner::extract_top_threat(s, &p.name));
 
     ApiProject {
         id: p.id,
