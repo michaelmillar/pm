@@ -78,8 +78,8 @@ Without `PM_ROOT`, `pm scan` falls back to `~/projects`. If that folder does not
 
 ```
 cd web && npm install && npm run build && cd ..
-pm serve
-# open http://localhost:3000
+pm web
+# open http://localhost:3141
 ```
 
 The dashboard mirrors the CLI. Sortable portfolio table, per-project detail with archetype radar, lifecycle stage pills, roadmap readiness, and milestone tracking.
